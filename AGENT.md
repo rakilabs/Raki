@@ -133,14 +133,15 @@ Raki/
 └── src-tauri/                ← BACKEND (Rust) — see Sections 4, 6, 7
     ├── Cargo.toml            ← workspace manifest
     ├── tauri.conf.json
-    ├── src/main.rs           ← thin bin: calls raki_app::run()
+    ├── src/                  ← raki-app role: main.rs, lib.rs (run()), state.rs, error.rs, dto.rs, commands/
     └── crates/
         ├── raki-domain/      ← pure types + PORT TRAITS. No IO. No tauri. No SQL.
         ├── raki-storage/     ← rusqlite (bundled SQLite + FTS5 + sqlite-vec). THE ONLY SQL.
         ├── raki-retrieval/   ← hybrid search: BM25 ⊕ vector KNN, RRF fusion, chunking, rerank
         ├── raki-ai/          ← provider abstraction (local + cloud) + egress/consent policy
-        ├── raki-memory/      ← embedding pipeline, memory extraction/lifecycle, context assembly
-        └── raki-app/         ← composition root + #[tauri::command] surface (ONLY crate touching tauri)
+        └── raki-memory/      ← embedding pipeline, memory extraction/lifecycle, context assembly
+
+> Note: `raki-app` from the dependency graph is realized as the **`src-tauri` root package** itself — Tauri's `generate_context!` must run in the crate that owns `tauri.conf.json`. The 5 crates under `crates/` are the inward layers; nothing depends on the `src-tauri` package, so the dependency rule still holds.
 ```
 
 ### The dependency graph (memorize this)
@@ -263,7 +264,7 @@ function NoteList(props) {
 
 ## 6. Rust / Tauri backend architecture rules
 
-**Stack:** tauri `2.11` · rusqlite `0.40` (bundled SQLite, FTS5) · `sqlite-vec` · fastembed `5.15` ·
+**Stack:** tauri `2.11` · rusqlite `0.35` (bundled SQLite, FTS5) · `sqlite-vec` · fastembed `5.15` ·
 candle/mistralrs (optional embedded) · reqwest `0.13` · tokio `1.52` · serde `1.0.228` · uuid `1.23`
 (v7) · jiff `0.2` · thiserror `2.0` · tracing `0.1`.
 
@@ -605,7 +606,7 @@ A change is **done** only when **all** are true:
 
 - [ ] Builds clean: `cargo build` (workspace) and the frontend build both succeed.
 - [ ] **Lints clean:** `cargo clippy -- -D warnings`, `cargo fmt --check`; frontend `tsc --noEmit` + linter pass.
-- [ ] **Tests pass:** `cargo test` (workspace) + `vitest` green; new logic has tests; bugfixes have regression tests.
+- [ ] **Tests pass:** `cargo test --workspace` + `vitest` green; new logic has tests; bugfixes have regression tests. (Use `--workspace` — plain `cargo test` from the `src-tauri` root package runs only its own tests and silently skips every `crates/*` library test.)
 - [ ] **IPC bindings regenerated & committed** if any command/DTO changed.
 - [ ] **Migrations** (if any) run cleanly on a populated fixture and are forward-only.
 - [ ] **No boundary violations**, no new `invoke("string")`, no `unwrap()` in non-test code.
@@ -689,7 +690,7 @@ change, change it safely, and prove it."
 | Crate | Version | Role |
 |---|---|---|
 | tauri / tauri-build | `2.11.2` | desktop shell |
-| rusqlite (`bundled`) | `0.40.0` | SQLite + FTS5 |
+| rusqlite (`bundled`) | `0.35.0` | SQLite + FTS5 (pinned: `0.40` pulls a `libsqlite3-sys` build script using unstable `cfg_select`, which fails on stable Rust 1.93 — revisit when stabilized) |
 | `sqlite-vec` | (bundled extension) | vector search |
 | tokio-rusqlite / r2d2_sqlite | `0.7.0` / `0.34.0` | async/pool access |
 | refinery | `0.9.1` | migrations |

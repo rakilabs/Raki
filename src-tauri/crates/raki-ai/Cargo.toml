@@ -1,0 +1,12 @@
+[package]
+name = "raki-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+raki-domain = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

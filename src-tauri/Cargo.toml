@@ -1,18 +1,37 @@
 [package]
 name = "raki"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Raki — a local-first, AI-native second brain"
+authors = ["Raki"]
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [lib]
-# The `_lib` suffix may seem redundant but it is necessary
-# to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "raki_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[workspace]
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0"
+async-trait = "0.1.89"
+thiserror = "2.0"
+uuid = { version = "1.23", features = ["v7", "serde"] }
+tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "sync"] }
+rusqlite = { version = "0.35", features = ["bundled"] }  # 0.40 pulls libsqlite3-sys using unstable `cfg_select`; broken on stable Rust 1.93
+ts-rs = "12.0"
+tracing = "0.1"
+raki-domain = { path = "crates/raki-domain" }
+raki-storage = { path = "crates/raki-storage" }
+raki-retrieval = { path = "crates/raki-retrieval" }
+raki-ai = { path = "crates/raki-ai" }
+raki-memory = { path = "crates/raki-memory" }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -20,6 +39,12 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
+serde = { workspace = true }
+serde_json = { workspace = true }
+ts-rs = { workspace = true }
+async-trait = { workspace = true }
+raki-domain = { workspace = true }
+raki-storage = { workspace = true }
+raki-retrieval = { workspace = true }
+raki-ai = { workspace = true }
+raki-memory = { workspace = true }

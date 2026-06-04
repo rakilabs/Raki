@@ -1,0 +1,12 @@
+[package]
+name = "raki-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+raki-domain = { workspace = true }
+serde = { workspace = true }
+async-trait = { workspace = true }
+rusqlite = { workspace = true }
+tokio = { workspace = true }
