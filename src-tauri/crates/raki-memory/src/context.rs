@@ -33,8 +33,7 @@ pub fn assemble_context(candidates: &[Candidate], budget: usize) -> AssembledCon
     let mut ranked: Vec<&Candidate> = candidates.iter().collect();
     ranked.sort_by(|a, b| {
         b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .total_cmp(&a.score)
             .then_with(|| a.source_id.cmp(&b.source_id))
     });
 

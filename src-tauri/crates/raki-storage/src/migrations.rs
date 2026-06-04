@@ -22,9 +22,11 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     for (i, sql) in MIGRATIONS.iter().enumerate() {
         let version = (i + 1) as i64;
         if current < version {
-            conn.execute_batch(&format!(
-                "BEGIN; {sql} PRAGMA user_version = {version}; COMMIT;"
-            ))?;
+            // Migration SQL and the version bump commit (or roll back) together.
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(sql)?;
+            tx.pragma_update(None, "user_version", version)?;
+            tx.commit()?;
         }
     }
     Ok(())

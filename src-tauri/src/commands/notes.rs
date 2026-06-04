@@ -13,16 +13,7 @@ pub async fn create_note(
     state: State<'_, AppState>,
     input: CreateNoteInput,
 ) -> Result<NoteDto, AppError> {
-    let now = state.clock.now_ms();
-    let note = Note {
-        id: NoteId::new(),
-        title: input.title,
-        body: input.body,
-        created_at: now,
-        updated_at: now,
-        deleted_at: None,
-        version: 1,
-    };
+    let note = Note::new(input.title, input.body, state.clock.now_ms());
     state.notes.upsert(&note).await?;
     Ok(NoteDto::from(note))
 }

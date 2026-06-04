@@ -29,7 +29,7 @@ impl Default for NoteId {
 
 impl std::fmt::Display for NoteId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        self.0.fmt(f)
     }
 }
 

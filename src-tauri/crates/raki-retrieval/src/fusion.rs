@@ -15,11 +15,7 @@ pub fn reciprocal_rank_fusion(rankings: &[Vec<String>], k: f64) -> Vec<(String, 
         }
     }
     let mut fused: Vec<(String, f64)> = scores.into_iter().collect();
-    fused.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.0.cmp(&b.0))
-    });
+    fused.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     fused
 }
 

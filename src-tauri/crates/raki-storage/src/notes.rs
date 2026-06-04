@@ -19,9 +19,8 @@ impl SqliteNoteRepository {
 
 fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<Note> {
     let id_str: String = row.get("id")?;
-    let id = NoteId::parse(&id_str).map_err(|e| {
-        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-    })?;
+    let id =
+        NoteId::parse(&id_str).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
     Ok(Note {
         id,
         title: row.get("title")?,
@@ -63,15 +62,12 @@ impl NoteRepository for SqliteNoteRepository {
         let id_str = id.to_string();
         self.db
             .call(move |c| {
-                let mut stmt = c.prepare(
+                let mut stmt = c.prepare_cached(
                     "SELECT id, title, body, created_at, updated_at, deleted_at, version
                      FROM notes WHERE id = ?1 AND deleted_at IS NULL",
                 )?;
                 let mut rows = stmt.query(params![id_str])?;
-                match rows.next()? {
-                    Some(row) => Ok(Some(row_to_note(row)?)),
-                    None => Ok(None),
-                }
+                rows.next()?.map(row_to_note).transpose()
             })
             .await
     }
@@ -79,7 +75,7 @@ impl NoteRepository for SqliteNoteRepository {
     async fn list(&self) -> Result<Vec<Note>, DomainError> {
         self.db
             .call(|c| {
-                let mut stmt = c.prepare(
+                let mut stmt = c.prepare_cached(
                     "SELECT id, title, body, created_at, updated_at, deleted_at, version
                      FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC",
                 )?;
