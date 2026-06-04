@@ -2722,7 +2722,9 @@ dependencies = [
 name = "raki-retrieval"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "raki-domain",
+ "tokio",
 ]
 
 [[package]]

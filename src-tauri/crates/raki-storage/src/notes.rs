@@ -38,21 +38,24 @@ impl NoteRepository for SqliteNoteRepository {
         let n = note.clone();
         self.db
             .call(move |c| {
-                c.execute(
+                let id = n.id.to_string();
+                let tx = c.unchecked_transaction()?;
+                tx.execute(
                     "INSERT INTO notes (id, title, body, created_at, updated_at, deleted_at, version)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                      ON CONFLICT(id) DO UPDATE SET
                         title = ?2, body = ?3, updated_at = ?5, deleted_at = ?6, version = ?7",
-                    params![
-                        n.id.to_string(),
-                        n.title,
-                        n.body,
-                        n.created_at,
-                        n.updated_at,
-                        n.deleted_at,
-                        n.version
-                    ],
+                    params![id, n.title, n.body, n.created_at, n.updated_at, n.deleted_at, n.version],
                 )?;
+                // FTS5 has no UPDATE; refresh the row by delete+insert. Only index live notes.
+                tx.execute("DELETE FROM notes_fts WHERE note_id = ?1", params![id])?;
+                if n.deleted_at.is_none() {
+                    tx.execute(
+                        "INSERT INTO notes_fts (note_id, title, body) VALUES (?1, ?2, ?3)",
+                        params![id, n.title, n.body],
+                    )?;
+                }
+                tx.commit()?;
                 Ok(())
             })
             .await
@@ -91,11 +94,16 @@ impl NoteRepository for SqliteNoteRepository {
         let id_str = id.to_string();
         self.db
             .call(move |c| {
-                c.execute(
+                let tx = c.unchecked_transaction()?;
+                let changed = tx.execute(
                     "UPDATE notes SET deleted_at = ?2, version = version + 1
                      WHERE id = ?1 AND deleted_at IS NULL",
                     params![id_str, at_ms],
                 )?;
+                if changed > 0 {
+                    tx.execute("DELETE FROM notes_fts WHERE note_id = ?1", params![id_str])?;
+                }
+                tx.commit()?;
                 Ok(())
             })
             .await
@@ -144,5 +152,37 @@ mod tests {
         let listed = repo.list().await.unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].title, "Keep");
+    }
+
+    async fn fts_count(db: &Database, note_id: &str) -> i64 {
+        let id = note_id.to_string();
+        db.call(move |c| {
+            c.query_row(
+                "SELECT count(*) FROM notes_fts WHERE note_id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn upsert_indexes_into_fts() {
+        let db = Database::open_in_memory().unwrap();
+        let repo = SqliteNoteRepository::new(db.clone());
+        let id = NoteId::new();
+        repo.upsert(&sample(id, "Hello")).await.unwrap();
+        assert_eq!(fts_count(&db, &id.to_string()).await, 1);
+    }
+
+    #[tokio::test]
+    async fn soft_delete_removes_from_fts() {
+        let db = Database::open_in_memory().unwrap();
+        let repo = SqliteNoteRepository::new(db.clone());
+        let id = NoteId::new();
+        repo.upsert(&sample(id, "Hello")).await.unwrap();
+        repo.soft_delete(&id, 2000).await.unwrap();
+        assert_eq!(fts_count(&db, &id.to_string()).await, 0);
     }
 }

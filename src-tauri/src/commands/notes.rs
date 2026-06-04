@@ -30,20 +30,20 @@ pub async fn get_note(state: State<'_, AppState>, id: String) -> Result<Option<N
     Ok(state.notes.get(&note_id).await?.map(NoteDto::from))
 }
 
-/// Naive substring search over titles/bodies. Demonstrates the retrieval wiring;
-/// real hybrid FTS5 + sqlite-vec search replaces the body of this command later.
+/// Keyword search via FTS5: retrieval ranks ids, then we hydrate them to DTOs.
+/// (Hydration is one `get` per hit; fine at k = 20, personal scale.)
 #[tauri::command]
 pub async fn search_notes(
     state: State<'_, AppState>,
     query: String,
 ) -> Result<Vec<NoteDto>, AppError> {
-    let needle = query.to_lowercase();
-    let notes = state.notes.list().await?;
-    Ok(notes
-        .into_iter()
-        .filter(|n| {
-            n.title.to_lowercase().contains(&needle) || n.body.to_lowercase().contains(&needle)
-        })
-        .map(NoteDto::from)
-        .collect())
+    let ids = raki_retrieval::search(state.keyword.as_ref(), &query, 20).await?;
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        let note_id = NoteId::parse(&id)?;
+        if let Some(note) = state.notes.get(&note_id).await? {
+            out.push(NoteDto::from(note));
+        }
+    }
+    Ok(out)
 }

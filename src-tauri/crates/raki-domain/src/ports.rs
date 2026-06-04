@@ -60,11 +60,13 @@ pub trait VectorIndex: Send + Sync {
 
 pub struct KeywordHit {
     pub source_id: String,
+    /// FTS5 bm25 value; lower is a better match. Used by retrieval for rank ordering.
     pub score: f32,
 }
 
 #[async_trait]
 pub trait KeywordIndex: Send + Sync {
-    async fn upsert(&self, source_id: &str, text: &str) -> Result<(), DomainError>;
+    /// Best-first keyword hits for `query`, at most `k`. Read-only — index writes
+    /// happen transactionally inside the repository, not here.
     async fn query(&self, query: &str, k: usize) -> Result<Vec<KeywordHit>, DomainError>;
 }

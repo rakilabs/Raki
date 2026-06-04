@@ -6,3 +6,7 @@ license.workspace = true
 
 [dependencies]
 raki-domain = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }

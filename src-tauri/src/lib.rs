@@ -12,7 +12,7 @@ use tauri::Manager;
 
 use raki_ai::{EgressPolicy, FakeEmbeddingProvider};
 use raki_domain::Clock;
-use raki_storage::{Database, SqliteNoteRepository};
+use raki_storage::{Database, SqliteKeywordIndex, SqliteNoteRepository};
 
 use crate::commands::notes::{create_note, get_note, list_notes, search_notes};
 use crate::state::AppState;
@@ -37,10 +37,12 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             let db = Database::open(&dir.join("raki.sqlite"))?;
-            let notes = Arc::new(SqliteNoteRepository::new(db));
+            let notes = Arc::new(SqliteNoteRepository::new(db.clone()));
+            let keyword = Arc::new(SqliteKeywordIndex::new(db));
 
             app.manage(AppState {
                 notes,
+                keyword,
                 clock: Arc::new(SystemClock),
                 embedder: Arc::new(FakeEmbeddingProvider::new(384)),
                 egress: EgressPolicy::LocalOnly,

@@ -15,6 +15,15 @@ const MIGRATIONS: &[&str] = &[
         version INTEGER NOT NULL
     ) STRICT;
     CREATE INDEX idx_notes_updated ON notes(updated_at) WHERE deleted_at IS NULL;",
+    // V2: full-text search over live notes. Kept in sync transactionally by the repository.
+    "CREATE VIRTUAL TABLE notes_fts USING fts5(
+        note_id UNINDEXED,
+        title,
+        body,
+        tokenize = 'unicode61'
+    );
+    INSERT INTO notes_fts (note_id, title, body)
+        SELECT id, title, body FROM notes WHERE deleted_at IS NULL;",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
@@ -30,4 +39,20 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::db::Database;
+
+    #[tokio::test]
+    async fn migration_creates_fts_table() {
+        let db = Database::open_in_memory().unwrap();
+        // open_in_memory runs migrate(); notes_fts must exist and be queryable.
+        let count: i64 = db
+            .call(|c| c.query_row("SELECT count(*) FROM notes_fts", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 }
