@@ -23,7 +23,8 @@ const MAP_FLOOR: f64 = 0.90;
 #[ignore = "runs the real bge model (network + native runtime); run with --ignored"]
 async fn retrieval_meets_quality_floor() -> Result<(), Box<dyn std::error::Error>> {
     let embedder = Arc::new(FastEmbedProvider::try_new()?);
-    let report = run_eval(embedder, 3).await?;
+    let run = run_eval(embedder, 3).await?;
+    let report = &run.report;
 
     // Floor the PRODUCTION method (hybrid — what search_notes uses). Both recall and
     // MAP are gated so ranking can't rot while recall holds.
