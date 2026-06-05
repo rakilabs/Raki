@@ -1,4 +1,4 @@
-# AGENT.md — Raki
+# AGENTS.md — Raki
 
 > **Read this first, every time.** This file is the operating contract for any human or AI agent
 > working in this repository. It encodes *how* we build Raki so that the codebase stays fast,
@@ -106,7 +106,7 @@ These are the laws. Everything else is detail.
 
 ```
 Raki/
-├── AGENT.md                  ← you are here (the operating contract)
+├── AGENTS.md                  ← you are here (the operating contract)
 ├── README.md
 ├── docs/
 │   ├── adr/                  ← Architecture Decision Records (the "why")
@@ -611,7 +611,7 @@ A change is **done** only when **all** are true:
 - [ ] **Migrations** (if any) run cleanly on a populated fixture and are forward-only.
 - [ ] **No boundary violations**, no new `invoke("string")`, no `unwrap()` in non-test code.
 - [ ] **Data-safe & privacy-safe:** soft-delete respected; egress policy honored; no secrets/PII logged.
-- [ ] **Docs updated:** ADR added for important decisions; public APIs documented; `AGENT.md` updated if a *rule* changed.
+- [ ] **Docs updated:** ADR added for important decisions; public APIs documented; `AGENTS.md` updated if a *rule* changed.
 - [ ] Verified in the **real app** for user-facing changes (not just unit tests) — see `superpowers:verification-before-completion`.
 
 ---
@@ -659,7 +659,7 @@ change, change it safely, and prove it."
    tests. Keep them readable and behavior-focused.
 8. **Leave seams, not scaffolding.** Stable IDs, soft-delete, the change-log, the provider traits — these are
    cheap now and make the known futures (sync, new modules, new providers) additive instead of disruptive.
-9. **When you change a rule, change this file.** `AGENT.md` is the contract. If reality and `AGENT.md` disagree,
+9. **When you change a rule, change this file.** `AGENTS.md` is the contract. If reality and `AGENTS.md` disagree,
    one of them is a bug — and usually it's worth fixing both in the same PR.
 
 ---
