@@ -111,10 +111,12 @@ impl IndexingService {
         .await
     }
 
-    /// Fire-and-forget a pass; if one is already in flight, do nothing.
+    /// Fire-and-forget a pass; if one is already in flight, do nothing. Spawns on Tauri's
+    /// managed runtime (not `tokio::spawn`) so it works from the synchronous `setup` hook,
+    /// which runs before any Tokio reactor is entered, as well as from async commands.
     pub fn trigger(self: &Arc<Self>) {
         let this = self.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let Ok(_guard) = this.running.try_lock() else {
                 return; // single-flight: a pass is already running
             };

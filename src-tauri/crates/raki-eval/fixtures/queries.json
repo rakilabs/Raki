@@ -6,8 +6,15 @@
   { "query": "do I need cash for the ryokan in Hakone", "category": "buried-fact-in-long-note", "relevant_ids": ["n6"] },
   { "query": "how should I pay when I arrive at the inn", "category": "buried-fact-in-long-note", "relevant_ids": ["n6"] },
   { "query": "what upcoming deadlines and appointments do I have", "category": "multi-relevant", "relevant_ids": ["n2", "n4"] },
+  { "query": "getting around Tokyo by train", "category": "multi-relevant", "relevant_ids": ["n6", "n12"] },
+  { "query": "core Rust language concepts for beginners", "category": "multi-relevant", "relevant_ids": ["n3", "n10"] },
   { "query": "Dr. Patel", "category": "named-entity", "relevant_ids": ["n4"] },
   { "query": "when are quarterly estimated taxes due", "category": "temporal", "relevant_ids": ["n2"] },
   { "query": "bitwardn migrat export vualt", "category": "messy", "relevant_ids": ["n8"] },
+  { "query": "E0433", "category": "named-entity", "relevant_ids": ["n9"] },
+  { "query": "I can't fall asleep at night, what helps", "category": "semantic-paraphrase", "relevant_ids": ["n11"] },
+  { "query": "pgbouncer connection pool sizing", "category": "lexical-overlap", "relevant_ids": ["n13"] },
+  { "query": "E0599", "category": "lexical-cluster", "relevant_ids": ["n21"] },
+  { "query": "E0502", "category": "lexical-cluster", "relevant_ids": ["n20"] },
   { "query": "how do I change a flat car tire", "category": "negative", "relevant_ids": [] }
 ]

@@ -58,12 +58,18 @@ pub fn run() {
                 }
             };
 
-            let index = Arc::new(IndexingService::new(store, embedder, vectors));
+            let index = Arc::new(IndexingService::new(
+                store,
+                embedder.clone(),
+                vectors.clone(),
+            ));
             index.trigger(); // startup catch-up pass (backfill + drain), single-flight
 
             app.manage(AppState {
                 notes,
                 keyword,
+                vectors,
+                embedder,
                 clock: Arc::new(SystemClock),
                 egress: EgressPolicy::LocalOnly,
                 index,

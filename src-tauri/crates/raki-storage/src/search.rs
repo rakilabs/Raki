@@ -18,14 +18,17 @@ impl SqliteKeywordIndex {
 }
 
 /// Turn free user text into a safe FTS5 MATCH expression: quote each whitespace-
-/// separated term (doubling embedded quotes) so punctuation can't break the grammar.
+/// separated term (doubling embedded quotes) so punctuation can't break the grammar,
+/// then join with `OR` so a verbose natural-language query matches any term and bm25
+/// ranks by overlap. (Space-joining is implicit AND in FTS5 — it returns nothing
+/// unless one note contains every word, which crippled multi-term queries.)
 /// Empty input yields an empty string, which the caller treats as "no results".
 fn fts_query(input: &str) -> String {
     input
         .split_whitespace()
         .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" OR ")
 }
 
 #[async_trait]
@@ -72,7 +75,7 @@ mod tests {
 
     #[test]
     fn fts_query_quotes_each_term_and_escapes_quotes() {
-        assert_eq!(fts_query("hello world"), "\"hello\" \"world\"");
+        assert_eq!(fts_query("hello world"), "\"hello\" OR \"world\"");
         assert_eq!(fts_query("  spaced  "), "\"spaced\"");
         assert_eq!(fts_query(""), "");
         // a stray double-quote must not break the FTS5 grammar

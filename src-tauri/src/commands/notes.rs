@@ -31,14 +31,21 @@ pub async fn get_note(state: State<'_, AppState>, id: String) -> Result<Option<N
     Ok(state.notes.get(&note_id).await?.map(NoteDto::from))
 }
 
-/// Keyword search via FTS5: retrieval ranks ids, then we hydrate them to DTOs.
-/// (Hydration is one `get` per hit; fine at k = 20, personal scale.)
+/// Hybrid search: fuse FTS5 keyword + sqlite-vec vector rankings (RRF), then hydrate
+/// the ranked ids to DTOs. (Hydration is one `get` per hit; fine at k = 20.)
 #[tauri::command]
 pub async fn search_notes(
     state: State<'_, AppState>,
     query: String,
 ) -> Result<Vec<NoteDto>, AppError> {
-    let ids = raki_retrieval::search(state.keyword.as_ref(), &query, 20).await?;
+    let ids = raki_retrieval::hybrid_search(
+        state.keyword.as_ref(),
+        state.vectors.as_ref(),
+        state.embedder.as_ref(),
+        &query,
+        20,
+    )
+    .await?;
     let mut out = Vec::with_capacity(ids.len());
     for id in ids {
         let note_id = NoteId::parse(&id)?;

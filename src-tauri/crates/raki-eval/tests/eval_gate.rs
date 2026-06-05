@@ -13,33 +13,30 @@ use std::sync::Arc;
 use raki_ai::FastEmbedProvider;
 use raki_eval::run_eval;
 
-// Calibrated 2026-06-05 from the first eval-report run. Set ~0.1 below observed
-// OVERALL to avoid flakiness; raise when retrieval improves.
-const RECALL_FLOOR: f64 = 0.60;
-const MAP_FLOOR: f64 = 0.45;
+// Calibrated 2026-06-05 at k=3 on the 18-note corpus from the first 3-method
+// eval-report run. Floors are ~0.10 below observed OVERALL hybrid. Ratchet UP as the
+// corpus and retrieval improve — never silently down.
+const RECALL_FLOOR: f64 = 0.90;
+const MAP_FLOOR: f64 = 0.90;
 
 #[tokio::test]
 #[ignore = "runs the real bge model (network + native runtime); run with --ignored"]
 async fn retrieval_meets_quality_floor() -> Result<(), Box<dyn std::error::Error>> {
     let embedder = Arc::new(FastEmbedProvider::try_new()?);
-    let report = run_eval(embedder, 5).await?;
+    let report = run_eval(embedder, 3).await?;
 
-    // The gate floors the BEST available single method (vector here; fusion in #2
-    // should only raise this). Both recall and MAP are gated so ranking can't rot
-    // while recall holds.
-    let best_recall = report
-        .overall_keyword
-        .recall
-        .max(report.overall_vector.recall);
-    let best_map = report.overall_keyword.map.max(report.overall_vector.map);
+    // Floor the PRODUCTION method (hybrid — what search_notes uses). Both recall and
+    // MAP are gated so ranking can't rot while recall holds.
+    let recall = report.overall_hybrid.recall;
+    let map = report.overall_hybrid.map;
 
     assert!(
-        best_recall >= RECALL_FLOOR,
-        "overall recall {best_recall:.3} fell below floor {RECALL_FLOOR}"
+        recall >= RECALL_FLOOR,
+        "hybrid recall {recall:.3} below floor {RECALL_FLOOR}"
     );
     assert!(
-        best_map >= MAP_FLOOR,
-        "overall MAP {best_map:.3} fell below floor {MAP_FLOOR}"
+        map >= MAP_FLOOR,
+        "hybrid MAP {map:.3} below floor {MAP_FLOOR}"
     );
     Ok(())
 }

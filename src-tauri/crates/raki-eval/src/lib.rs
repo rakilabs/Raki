@@ -39,7 +39,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use raki_domain::{DomainError, EmbeddingProvider, Note, NoteRepository, VectorIndex};
-use raki_retrieval::{average_precision_at_k, recall_at_k, reciprocal_rank, search, vector_search};
+use raki_retrieval::{
+    average_precision_at_k, hybrid_search, recall_at_k, reciprocal_rank, search, vector_search,
+};
 use raki_storage::{Database, SqliteKeywordIndex, SqliteNoteRepository, SqliteVectorIndex};
 
 /// Mean metrics for one retrieval method over a set of (scored) queries.
@@ -57,6 +59,7 @@ pub struct CategoryReport {
     pub scored: usize,
     pub keyword: MethodScores,
     pub vector: MethodScores,
+    pub hybrid: MethodScores,
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +67,7 @@ pub struct Report {
     pub k: usize,
     pub overall_keyword: MethodScores,
     pub overall_vector: MethodScores,
+    pub overall_hybrid: MethodScores,
     pub by_category: Vec<CategoryReport>,
     /// Categories with no relevant labels (e.g. `negative`): tracked, not scored in v1
     /// (true-negative precision needs a score threshold we don't have yet).
@@ -113,6 +117,7 @@ pub async fn run_eval(
     // Accumulators keyed by category, plus overall.
     let mut cat_kw: HashMap<String, ScoreAcc> = Default::default();
     let mut cat_vec: HashMap<String, ScoreAcc> = Default::default();
+    let mut cat_hyb: HashMap<String, ScoreAcc> = Default::default();
     let mut unscored: HashSet<String> = HashSet::new();
 
     for q in &queries {
@@ -125,6 +130,10 @@ pub async fn run_eval(
         let kw_ids = to_fixture(&search(&keyword, &q.query, k).await?, &fixture_of);
         let vec_ids = to_fixture(
             &vector_search(&vectors, embedder.as_ref(), &q.query, k).await?,
+            &fixture_of,
+        );
+        let hyb_ids = to_fixture(
+            &hybrid_search(&keyword, &vectors, embedder.as_ref(), &q.query, k).await?,
             &fixture_of,
         );
 
@@ -140,12 +149,21 @@ pub async fn run_eval(
             &relevant,
             k,
         );
+        push_scores(
+            cat_hyb.entry(q.category.clone()).or_default(),
+            &hyb_ids,
+            &relevant,
+            k,
+        );
     }
 
     let mut by_category: Vec<CategoryReport> = Vec::new();
     for (cat, kw) in &cat_kw {
         let vc = cat_vec.get(cat).ok_or_else(|| {
             DomainError::Provider(format!("category {cat} missing from vector scores"))
+        })?;
+        let hy = cat_hyb.get(cat).ok_or_else(|| {
+            DomainError::Provider(format!("category {cat} missing from hybrid scores"))
         })?;
         by_category.push(CategoryReport {
             category: cat.clone(),
@@ -160,12 +178,18 @@ pub async fn run_eval(
                 map: mean(&vc.1),
                 mrr: mean(&vc.2),
             },
+            hybrid: MethodScores {
+                recall: mean(&hy.0),
+                map: mean(&hy.1),
+                mrr: mean(&hy.2),
+            },
         });
     }
     by_category.sort_by(|a, b| a.category.cmp(&b.category));
 
     let overall_keyword = overall(&cat_kw);
     let overall_vector = overall(&cat_vec);
+    let overall_hybrid = overall(&cat_hyb);
     let mut unscored_categories: Vec<String> = unscored.into_iter().collect();
     unscored_categories.sort();
 
@@ -173,6 +197,7 @@ pub async fn run_eval(
         k,
         overall_keyword,
         overall_vector,
+        overall_hybrid,
         by_category,
         unscored_categories,
     })
@@ -242,6 +267,11 @@ mod tests {
             assert!(c.keyword.recall >= 0.0 && c.keyword.recall <= 1.0);
             assert!(c.vector.map >= 0.0 && c.vector.map <= 1.0);
         }
+        // Hybrid is computed and in range for every scored category.
+        for c in &report.by_category {
+            assert!(c.hybrid.recall >= 0.0 && c.hybrid.recall <= 1.0);
+        }
+        assert!(report.overall_hybrid.recall >= 0.0 && report.overall_hybrid.recall <= 1.0);
         // Keyword must actually find the exact lexical-overlap matches (sanity that
         // the index is wired), independent of the fake embedder's meaningless vectors.
         let lex = report
@@ -259,7 +289,7 @@ mod tests {
     fn fixtures_parse_and_reference_real_corpus_ids() {
         let corpus = load_corpus();
         let queries = load_queries();
-        assert!(corpus.len() >= 6, "need a non-trivial corpus");
+        assert!(corpus.len() >= 20, "need a non-trivial corpus");
         assert!(queries.len() >= 8, "need queries across the taxonomy");
 
         let ids: std::collections::HashSet<&str> = corpus.iter().map(|n| n.id.as_str()).collect();
