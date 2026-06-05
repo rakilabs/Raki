@@ -32,6 +32,14 @@ pub trait EmbeddingProvider: Send + Sync {
     /// Stable identifier of the model+version. Drives embedding staleness: changing
     /// it re-embeds the whole corpus.
     fn model_id(&self) -> String;
+
+    /// Embed search QUERIES (as opposed to documents). Defaults to `embed`; providers
+    /// whose model wants an asymmetric query prefix override this. The pipeline embeds
+    /// documents with `embed`; the retrieval/eval layer embeds queries with this.
+    async fn embed_query(&self, queries: &[String]) -> Result<Vec<Embedding>, DomainError> {
+        self.embed(queries).await
+    }
+
     async fn embed(&self, inputs: &[String]) -> Result<Vec<Embedding>, DomainError>;
 }
 

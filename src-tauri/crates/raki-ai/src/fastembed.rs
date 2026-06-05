@@ -13,8 +13,16 @@ pub const MODEL_ID: &str = "bge-small-en-v1.5";
 /// bge models want a query instruction prefix on the QUERY side only. Document
 /// embeddings (the pipeline's path) are embedded as-is; the query-issuing layer
 /// (retrieval/eval, later slices) applies this prefix. Exposed here for reuse.
-#[allow(dead_code)]
 pub const BGE_QUERY_PREFIX: &str = "Represent this sentence for searching relevant passages: ";
+
+/// Prepend the bge query instruction to each query. Pure (model-free) so it is unit
+/// testable without downloading the model.
+fn apply_query_prefix(queries: &[String]) -> Vec<String> {
+    queries
+        .iter()
+        .map(|q| format!("{BGE_QUERY_PREFIX}{q}"))
+        .collect()
+}
 
 pub struct FastEmbedProvider {
     model: Arc<Mutex<TextEmbedding>>,
@@ -53,12 +61,23 @@ impl EmbeddingProvider for FastEmbedProvider {
             .map_err(|e| DomainError::Provider(format!("embed: {e}")))?;
         Ok(vectors.into_iter().map(Embedding).collect())
     }
+
+    async fn embed_query(&self, queries: &[String]) -> Result<Vec<Embedding>, DomainError> {
+        self.embed(&apply_query_prefix(queries)).await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use raki_domain::{EmbeddingProvider, Locality};
+
+    #[test]
+    fn query_prefix_is_applied_to_each_query() {
+        let out = apply_query_prefix(&["apples".to_string(), "oranges".to_string()]);
+        assert_eq!(out[0], format!("{BGE_QUERY_PREFIX}apples"));
+        assert_eq!(out[1], format!("{BGE_QUERY_PREFIX}oranges"));
+    }
 
     #[tokio::test]
     #[ignore = "downloads the bge-small model on first run; run explicitly with --ignored"]
