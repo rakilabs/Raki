@@ -14,16 +14,19 @@ fn fmt_opt(o: Option<f64>) -> String {
 
 fn row(label: &str, kw: MethodScores, vc: MethodScores, hy: MethodScores) {
     println!(
-        "{label:<24} | kw R{:.2} M{:.2} N{} | vec R{:.2} M{:.2} N{} | hyb R{:.2} M{:.2} N{}",
+        "{label:<24} | kw R{:.2} M{:.2} N{} Cov{} | vec R{:.2} M{:.2} N{} Cov{} | hyb R{:.2} M{:.2} N{} Cov{}",
         kw.recall,
         kw.map,
         fmt_opt(kw.ndcg),
+        fmt_opt(kw.recall_cov),
         vc.recall,
         vc.map,
         fmt_opt(vc.ndcg),
+        fmt_opt(vc.recall_cov),
         hy.recall,
         hy.map,
         fmt_opt(hy.ndcg),
+        fmt_opt(hy.recall_cov),
     );
 }
 
@@ -43,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             c.hybrid,
         );
     }
-    println!("{}", "-".repeat(96));
+    println!("{}", "-".repeat(120));
     row(
         "OVERALL",
         report.overall_keyword,

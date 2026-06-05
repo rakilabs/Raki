@@ -13,9 +13,11 @@ use std::sync::Arc;
 use raki_ai::FastEmbedProvider;
 use raki_eval::run_eval;
 
-// Calibrated 2026-06-05 at k=3 on the 18-note corpus from the first 3-method
-// eval-report run. Floors are ~0.10 below observed OVERALL hybrid. Ratchet UP as the
-// corpus and retrieval improve — never silently down.
+// Calibrated 2026-06-05 at k=3 on the 22-note corpus / 19 queries. Floors are ~0.10
+// below observed OVERALL hybrid (R0.97/M0.97, which already averages in the coverage
+// query whose recall@3 is capped at 3/|relevant| by design). Ratchet UP as the corpus
+// and retrieval improve — never silently down. 3a-ii replaces this single overall floor
+// with per-method floors (D8) so coverage recall stops diluting the precision floor.
 const RECALL_FLOOR: f64 = 0.90;
 const MAP_FLOOR: f64 = 0.90;
 

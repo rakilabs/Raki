@@ -206,7 +206,12 @@ fn truncate(ids: &[String], k: usize) -> Vec<String> {
     ids.iter().take(k).cloned().collect()
 }
 
-fn score_one(ranked: &[String], relevant: &HashSet<String>, k: usize, q: &EvalQuery) -> MethodScores {
+fn score_one(
+    ranked: &[String],
+    relevant: &HashSet<String>,
+    k: usize,
+    q: &EvalQuery,
+) -> MethodScores {
     MethodScores {
         recall: recall_at_k(ranked, relevant, k).unwrap_or(0.0),
         map: average_precision_at_k(ranked, relevant, k).unwrap_or(0.0),
