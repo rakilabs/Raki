@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use rusqlite::params;
-use rusqlite::OptionalExtension;
 
 use raki_domain::{DomainError, Note, NoteId, NoteRepository};
 
@@ -46,16 +45,6 @@ impl NoteRepository for SqliteNoteRepository {
                 let hash = content_hash(&n.title, &n.body);
                 let tx = c.unchecked_transaction()?;
 
-                // Only re-index FTS5 if the content actually changed.
-                let old_hash: Option<String> = tx
-                    .query_row(
-                        "SELECT content_hash FROM notes WHERE id = ?1",
-                        params![id],
-                        |r| r.get(0),
-                    )
-                    .optional()?;
-                let content_changed = old_hash.as_ref() != Some(&hash);
-
                 tx.execute(
                     "INSERT INTO notes (id, title, body, created_at, updated_at, deleted_at, version, content_hash)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -64,15 +53,14 @@ impl NoteRepository for SqliteNoteRepository {
                     params![id, n.title, n.body, n.created_at, n.updated_at, n.deleted_at, n.version, hash],
                 )?;
 
-                // FTS5 has no UPDATE; refresh the row by delete+insert. Only index live notes.
-                if content_changed {
-                    tx.execute("DELETE FROM notes_fts WHERE note_id = ?1", params![id])?;
-                    if n.deleted_at.is_none() {
-                        tx.execute(
-                            "INSERT INTO notes_fts (note_id, title, body) VALUES (?1, ?2, ?3)",
-                            params![id, n.title, n.body],
-                        )?;
-                    }
+                // FTS5 has no UPDATE; refresh the row by delete+insert so the index always
+                // reflects current content AND liveness — a resurrected note re-enters FTS.
+                tx.execute("DELETE FROM notes_fts WHERE note_id = ?1", params![id])?;
+                if n.deleted_at.is_none() {
+                    tx.execute(
+                        "INSERT INTO notes_fts (note_id, title, body) VALUES (?1, ?2, ?3)",
+                        params![id, n.title, n.body],
+                    )?;
                 }
                 tx.commit()?;
                 Ok(())
@@ -114,8 +102,12 @@ impl NoteRepository for SqliteNoteRepository {
         self.db
             .call(move |c| {
                 let tx = c.unchecked_transaction()?;
+                // Clear the embedding staleness keys: the vector is destroyed below, so
+                // the keys must not claim it still exists (else a resurrected note with
+                // unchanged content would never re-embed).
                 let changed = tx.execute(
-                    "UPDATE notes SET deleted_at = ?2, version = version + 1
+                    "UPDATE notes SET deleted_at = ?2, version = version + 1,
+                        embedded_hash = NULL, embedded_model = NULL
                      WHERE id = ?1 AND deleted_at IS NULL",
                     params![id_str, at_ms],
                 )?;
@@ -279,5 +271,43 @@ mod tests {
 
         repo.soft_delete(&id, 2000).await.unwrap();
         assert_eq!(vector_count(&db, &id.to_string()).await, 0);
+    }
+
+    #[tokio::test]
+    async fn resurrection_reindexes_fts_and_marks_pending() {
+        use crate::indexing::SqliteIndexingStore;
+        use raki_domain::IndexingStore;
+
+        let db = Database::open_in_memory().unwrap();
+        let repo = SqliteNoteRepository::new(db.clone());
+        let store = SqliteIndexingStore::new(db.clone());
+        let id = NoteId::new();
+
+        // Live + embedded: in FTS, not pending.
+        repo.upsert(&sample(id, "Hello")).await.unwrap();
+        let hash = store.list_pending("m", 10).await.unwrap()[0]
+            .content_hash
+            .clone();
+        store.mark_embedded(&id, &hash, "m").await.unwrap();
+        assert_eq!(fts_count(&db, &id.to_string()).await, 1);
+        assert!(store.list_pending("m", 10).await.unwrap().is_empty());
+
+        // Soft-delete drops the FTS row, the vector, and the staleness keys.
+        repo.soft_delete(&id, 2000).await.unwrap();
+        assert_eq!(fts_count(&db, &id.to_string()).await, 0);
+
+        // Resurrect with identical content (deleted_at -> None): must re-enter FTS and
+        // become pending again, because its vector was destroyed on delete.
+        repo.upsert(&sample(id, "Hello")).await.unwrap();
+        assert_eq!(
+            fts_count(&db, &id.to_string()).await,
+            1,
+            "resurrected note must re-enter FTS"
+        );
+        assert_eq!(
+            store.list_pending("m", 10).await.unwrap().len(),
+            1,
+            "resurrected note must re-embed"
+        );
     }
 }
