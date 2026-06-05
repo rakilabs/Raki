@@ -1,0 +1,13 @@
+[
+  { "query": "sourdough starter feeding", "category": "lexical-overlap", "relevant_ids": ["n1"] },
+  { "query": "rust borrow checker", "category": "lexical-overlap", "relevant_ids": ["n3"] },
+  { "query": "my espresso is too acidic, what should I change", "category": "semantic-paraphrase", "relevant_ids": ["n7"] },
+  { "query": "keeping tomato plants alive in the heat", "category": "semantic-paraphrase", "relevant_ids": ["n5"] },
+  { "query": "do I need cash for the ryokan in Hakone", "category": "buried-fact-in-long-note", "relevant_ids": ["n6"] },
+  { "query": "how should I pay when I arrive at the inn", "category": "buried-fact-in-long-note", "relevant_ids": ["n6"] },
+  { "query": "what upcoming deadlines and appointments do I have", "category": "multi-relevant", "relevant_ids": ["n2", "n4"] },
+  { "query": "Dr. Patel", "category": "named-entity", "relevant_ids": ["n4"] },
+  { "query": "when are quarterly estimated taxes due", "category": "temporal", "relevant_ids": ["n2"] },
+  { "query": "bitwardn migrat export vualt", "category": "messy", "relevant_ids": ["n8"] },
+  { "query": "how do I change a flat car tire", "category": "negative", "relevant_ids": [] }
+]

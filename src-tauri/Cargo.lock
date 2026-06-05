@@ -3756,6 +3756,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "raki-eval"
+version = "0.1.0"
+dependencies = [
+ "raki-ai",
+ "raki-domain",
+ "raki-retrieval",
+ "raki-storage",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "raki-memory"
 version = "0.1.0"
 dependencies = [

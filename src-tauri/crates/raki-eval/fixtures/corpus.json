@@ -1,0 +1,18 @@
+[
+  { "id": "n1", "title": "Sourdough starter schedule",
+    "body": "Feed the starter once every 24 hours. Discard half, then add equal parts flour and water by weight (1:1:1). It is ready to bake when it doubles within four to six hours." },
+  { "id": "n2", "title": "Estimated tax due dates 2026",
+    "body": "Federal income tax filing is due April 15. Quarterly estimated payments are due April 15, June 15, September 15, and January 15 of the following year." },
+  { "id": "n3", "title": "Rust ownership notes",
+    "body": "Every value has one owner. Moves transfer ownership; the borrow checker enforces that references never outlive their referent. Use lifetimes to relate the validity of references." },
+  { "id": "n4", "title": "Follow-up with Dr. Patel",
+    "body": "Reviewed the knee MRI results. Next appointment in six weeks to decide on physical therapy versus a referral to orthopedics." },
+  { "id": "n5", "title": "Summer garden watering",
+    "body": "Tomatoes want a deep soak twice a week rather than daily shallow watering. Mulch to keep the roots cool and reduce evaporation in the heat." },
+  { "id": "n6", "title": "Japan trip planning 2026",
+    "body": "Flights land at Haneda in the evening; take the monorail to the hotel in Shinagawa. Spend three days in Tokyo: Asakusa, the teamLab museum, and a day trip to Nikko. Then the shinkansen to Kyoto for temples and the bamboo grove. Important: the ryokan in Hakone only accepts payment in cash on arrival, so withdraw yen beforehand. Budget for the Hakone free pass and a luggage-forwarding service between cities. End the trip with two relaxed days in Osaka for food." },
+  { "id": "n7", "title": "Dialing in espresso",
+    "body": "If the shot tastes sour and thin, the grind is too coarse and the extraction too fast; grind finer. Aim for a 1:2 ratio of coffee to liquid over twenty-five to thirty seconds." },
+  { "id": "n8", "title": "Password manager migration",
+    "body": "Exported the old vault as an encrypted CSV, imported it into Bitwarden, verified a few logins, then securely deleted the export file." }
+]
