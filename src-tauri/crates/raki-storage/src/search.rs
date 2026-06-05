@@ -44,7 +44,7 @@ impl KeywordIndex for SqliteKeywordIndex {
                     "SELECT note_id, bm25(notes_fts) AS score
                      FROM notes_fts
                      WHERE notes_fts MATCH ?1
-                     ORDER BY score
+                     ORDER BY score, note_id
                      LIMIT ?2",
                 )?;
                 let hits = stmt
@@ -64,7 +64,7 @@ impl KeywordIndex for SqliteKeywordIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use raki_domain::{KeywordIndex, Note, NoteRepository};
+    use raki_domain::{KeywordIndex, Note, NoteId, NoteRepository};
 
     use crate::db::Database;
     use crate::notes::SqliteNoteRepository;
@@ -103,5 +103,40 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let index = SqliteKeywordIndex::new(db);
         assert!(index.query("   ", 10).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn ties_break_by_note_id_deterministically() {
+        let db = Database::open_in_memory().unwrap();
+        let repo = SqliteNoteRepository::new(db.clone());
+        let index = SqliteKeywordIndex::new(db);
+        // Two notes that match "apple" identically (same single term, same length).
+        let a = Note {
+            id: NoteId::parse("00000000-0000-7000-8000-000000000001").unwrap(),
+            title: "apple".into(),
+            body: "x".into(),
+            created_at: 1,
+            updated_at: 1,
+            deleted_at: None,
+            version: 1,
+        };
+        let b = Note {
+            id: NoteId::parse("00000000-0000-7000-8000-000000000002").unwrap(),
+            title: "apple".into(),
+            body: "x".into(),
+            created_at: 1,
+            updated_at: 1,
+            deleted_at: None,
+            version: 1,
+        };
+        repo.upsert(&b).await.unwrap();
+        repo.upsert(&a).await.unwrap();
+        let hits = index.query("apple", 10).await.unwrap();
+        let ids: Vec<String> = hits.into_iter().map(|h| h.source_id).collect();
+        assert_eq!(
+            ids,
+            vec![a.id.to_string(), b.id.to_string()],
+            "ties ordered by note_id"
+        );
     }
 }

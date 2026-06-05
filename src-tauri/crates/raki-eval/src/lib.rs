@@ -17,11 +17,18 @@ pub struct CorpusNote {
 pub struct EvalQuery {
     pub query: String,
     pub category: String,
+    /// "dev" (used while tuning) or "holdout" (run only by the gate). Defaults to "dev".
+    #[serde(default = "default_set")]
+    pub set: String,
     #[serde(default)]
     pub relevant_ids: Vec<String>,
     /// Optional graded relevance (fixture id → grade). Absent ⇒ binary; nDCG dormant.
     #[serde(default)]
     pub grades: HashMap<String, f64>,
+}
+
+fn default_set() -> String {
+    "dev".to_string()
 }
 
 const CORPUS_JSON: &str = include_str!("../fixtures/corpus.json");
@@ -40,7 +47,8 @@ use std::sync::Arc;
 
 use raki_domain::{DomainError, EmbeddingProvider, Note, NoteRepository, VectorIndex};
 use raki_retrieval::{
-    average_precision_at_k, hybrid_search, recall_at_k, reciprocal_rank, search, vector_search,
+    average_precision_at_k, hybrid_search, ndcg_at_k, recall_at_k, reciprocal_rank, search,
+    vector_search,
 };
 use raki_storage::{Database, SqliteKeywordIndex, SqliteNoteRepository, SqliteVectorIndex};
 
@@ -50,6 +58,10 @@ pub struct MethodScores {
     pub recall: f64,
     pub map: f64,
     pub mrr: f64,
+    /// Mean nDCG@k over graded queries only; None when none are graded.
+    pub ndcg: Option<f64>,
+    /// Mean recall@K_cov over coverage queries only; None when none are coverage.
+    pub recall_cov: Option<f64>,
 }
 
 /// Per-category breakdown — the point of the taxonomy.
@@ -74,22 +86,41 @@ pub struct Report {
     pub unscored_categories: Vec<String>,
 }
 
-type ScoreAcc = (Vec<f64>, Vec<f64>, Vec<f64>);
-
-fn mean(xs: &[f64]) -> f64 {
-    if xs.is_empty() {
-        0.0
-    } else {
-        xs.iter().sum::<f64>() / xs.len() as f64
-    }
+/// One method's outcome for one query: the ranked fixture ids (top-k) and the metrics.
+#[derive(Debug, Clone)]
+pub struct MethodResult {
+    pub ranked: Vec<String>, // fixture ids, best-first, truncated to k
+    pub scores: MethodScores,
 }
 
+/// Per-query detail for every method — the substrate for the audit (3a-i) and the
+/// per-query snapshot gate (3a-ii).
+#[derive(Debug, Clone)]
+pub struct QueryResult {
+    pub query: String,
+    pub category: String,
+    pub set: String,
+    pub keyword: MethodResult,
+    pub vector: MethodResult,
+    pub hybrid: MethodResult,
+}
+
+/// Everything one eval run produces.
+#[derive(Debug, Clone)]
+pub struct EvalRun {
+    pub report: Report,
+    pub per_query: Vec<QueryResult>,
+}
+
+const COVERAGE_K: usize = 10;
+
 /// Build a fresh in-memory index from the golden set, embed every document directly,
-/// then score keyword and vector retrieval per query. Returns aggregated metrics.
+/// then score keyword and vector retrieval per query. Returns aggregated metrics
+/// plus per-query detail.
 pub async fn run_eval(
     embedder: Arc<dyn EmbeddingProvider>,
     k: usize,
-) -> Result<Report, DomainError> {
+) -> Result<EvalRun, DomainError> {
     let corpus = load_corpus();
     let queries = load_queries();
 
@@ -98,13 +129,12 @@ pub async fn run_eval(
     let keyword = SqliteKeywordIndex::new(db.clone());
     let vectors = SqliteVectorIndex::new(db.clone());
 
-    // Map fixture id <-> stored NoteId (uuid), and insert + embed each note directly.
     let mut fixture_of: HashMap<String, String> = HashMap::new();
     for cn in &corpus {
-        const DUMMY_EPOCH_MS: i64 = 1000; // arbitrary; eval only cares about content, not timestamps
+        const DUMMY_EPOCH_MS: i64 = 1000;
         let note = Note::new(cn.title.clone(), cn.body.clone(), DUMMY_EPOCH_MS);
         let uuid = note.id.to_string();
-        repo.upsert(&note).await?; // populates FTS
+        repo.upsert(&note).await?;
         let doc = format!("{}\n\n{}", cn.title, cn.body);
         let emb = embedder.embed(std::slice::from_ref(&doc)).await?;
         let emb = emb.first().ok_or_else(|| {
@@ -114,93 +144,135 @@ pub async fn run_eval(
         fixture_of.insert(uuid, cn.id.clone());
     }
 
-    // Accumulators keyed by category, plus overall.
-    let mut cat_kw: HashMap<String, ScoreAcc> = Default::default();
-    let mut cat_vec: HashMap<String, ScoreAcc> = Default::default();
-    let mut cat_hyb: HashMap<String, ScoreAcc> = Default::default();
+    let mut per_query: Vec<QueryResult> = Vec::new();
     let mut unscored: HashSet<String> = HashSet::new();
 
     for q in &queries {
         if q.relevant_ids.is_empty() {
             unscored.insert(q.category.clone());
-            continue; // negatives: tracked, not scored in v1
+            continue;
         }
         let relevant: HashSet<String> = q.relevant_ids.iter().cloned().collect();
+        let cov_k = if q.category == "coverage" {
+            COVERAGE_K
+        } else {
+            k
+        };
 
-        let kw_ids = to_fixture(&search(&keyword, &q.query, k).await?, &fixture_of);
-        let vec_ids = to_fixture(
-            &vector_search(&vectors, embedder.as_ref(), &q.query, k).await?,
+        let kw = to_fixture(
+            &search(&keyword, &q.query, cov_k.max(k)).await?,
             &fixture_of,
         );
-        let hyb_ids = to_fixture(
-            &hybrid_search(&keyword, &vectors, embedder.as_ref(), &q.query, k).await?,
+        let vc = to_fixture(
+            &vector_search(&vectors, embedder.as_ref(), &q.query, cov_k.max(k)).await?,
+            &fixture_of,
+        );
+        let hy = to_fixture(
+            &hybrid_search(
+                &keyword,
+                &vectors,
+                embedder.as_ref(),
+                &q.query,
+                cov_k.max(k),
+            )
+            .await?,
             &fixture_of,
         );
 
-        push_scores(
-            cat_kw.entry(q.category.clone()).or_default(),
-            &kw_ids,
-            &relevant,
-            k,
-        );
-        push_scores(
-            cat_vec.entry(q.category.clone()).or_default(),
-            &vec_ids,
-            &relevant,
-            k,
-        );
-        push_scores(
-            cat_hyb.entry(q.category.clone()).or_default(),
-            &hyb_ids,
-            &relevant,
-            k,
-        );
-    }
-
-    let mut by_category: Vec<CategoryReport> = Vec::new();
-    for (cat, kw) in &cat_kw {
-        let vc = cat_vec.get(cat).ok_or_else(|| {
-            DomainError::Provider(format!("category {cat} missing from vector scores"))
-        })?;
-        let hy = cat_hyb.get(cat).ok_or_else(|| {
-            DomainError::Provider(format!("category {cat} missing from hybrid scores"))
-        })?;
-        by_category.push(CategoryReport {
-            category: cat.clone(),
-            scored: kw.0.len(),
-            keyword: MethodScores {
-                recall: mean(&kw.0),
-                map: mean(&kw.1),
-                mrr: mean(&kw.2),
+        per_query.push(QueryResult {
+            query: q.query.clone(),
+            category: q.category.clone(),
+            set: q.set.clone(),
+            keyword: MethodResult {
+                scores: score_one(&kw, &relevant, k, q),
+                ranked: truncate(&kw, k),
             },
-            vector: MethodScores {
-                recall: mean(&vc.0),
-                map: mean(&vc.1),
-                mrr: mean(&vc.2),
+            vector: MethodResult {
+                scores: score_one(&vc, &relevant, k, q),
+                ranked: truncate(&vc, k),
             },
-            hybrid: MethodScores {
-                recall: mean(&hy.0),
-                map: mean(&hy.1),
-                mrr: mean(&hy.2),
+            hybrid: MethodResult {
+                scores: score_one(&hy, &relevant, k, q),
+                ranked: truncate(&hy, k),
             },
         });
     }
-    by_category.sort_by(|a, b| a.category.cmp(&b.category));
 
-    let overall_keyword = overall(&cat_kw);
-    let overall_vector = overall(&cat_vec);
-    let overall_hybrid = overall(&cat_hyb);
-    let mut unscored_categories: Vec<String> = unscored.into_iter().collect();
+    let report = aggregate(&per_query, &mut unscored, k);
+    Ok(EvalRun { report, per_query })
+}
+
+fn truncate(ids: &[String], k: usize) -> Vec<String> {
+    ids.iter().take(k).cloned().collect()
+}
+
+fn score_one(ranked: &[String], relevant: &HashSet<String>, k: usize, q: &EvalQuery) -> MethodScores {
+    MethodScores {
+        recall: recall_at_k(ranked, relevant, k).unwrap_or(0.0),
+        map: average_precision_at_k(ranked, relevant, k).unwrap_or(0.0),
+        mrr: reciprocal_rank(ranked, relevant).unwrap_or(0.0),
+        ndcg: if q.grades.is_empty() {
+            None
+        } else {
+            ndcg_at_k(ranked, &q.grades, k)
+        },
+        recall_cov: if q.category == "coverage" {
+            recall_at_k(ranked, relevant, COVERAGE_K)
+        } else {
+            None
+        },
+    }
+}
+
+fn aggregate(per_query: &[QueryResult], unscored: &mut HashSet<String>, k: usize) -> Report {
+    use std::collections::BTreeMap;
+    let mut cats: BTreeMap<&str, Vec<&QueryResult>> = BTreeMap::new();
+    for qr in per_query {
+        cats.entry(qr.category.as_str()).or_default().push(qr);
+    }
+    let mut by_category = Vec::new();
+    for (cat, qrs) in &cats {
+        by_category.push(CategoryReport {
+            category: cat.to_string(),
+            scored: qrs.len(),
+            keyword: mean_scores(qrs.iter().map(|q| q.keyword.scores)),
+            vector: mean_scores(qrs.iter().map(|q| q.vector.scores)),
+            hybrid: mean_scores(qrs.iter().map(|q| q.hybrid.scores)),
+        });
+    }
+    let overall_keyword = mean_scores(per_query.iter().map(|q| q.keyword.scores));
+    let overall_vector = mean_scores(per_query.iter().map(|q| q.vector.scores));
+    let overall_hybrid = mean_scores(per_query.iter().map(|q| q.hybrid.scores));
+    let mut unscored_categories: Vec<String> = unscored.drain().collect();
     unscored_categories.sort();
-
-    Ok(Report {
+    Report {
         k,
         overall_keyword,
         overall_vector,
         overall_hybrid,
         by_category,
         unscored_categories,
-    })
+    }
+}
+
+fn mean_scores(it: impl Iterator<Item = MethodScores>) -> MethodScores {
+    let v: Vec<MethodScores> = it.collect();
+    let n = v.len().max(1) as f64;
+    let opt_mean = |f: &dyn Fn(&MethodScores) -> Option<f64>| {
+        let present: Vec<f64> = v.iter().filter_map(f).collect();
+        if present.is_empty() {
+            None
+        } else {
+            Some(present.iter().sum::<f64>() / present.len() as f64)
+        }
+    };
+    MethodScores {
+        recall: v.iter().map(|s| s.recall).sum::<f64>() / n,
+        map: v.iter().map(|s| s.map).sum::<f64>() / n,
+        mrr: v.iter().map(|s| s.mrr).sum::<f64>() / n,
+        ndcg: opt_mean(&|s| s.ndcg),
+        recall_cov: opt_mean(&|s| s.recall_cov),
+    }
 }
 
 fn to_fixture(
@@ -213,34 +285,6 @@ fn to_fixture(
         .collect()
 }
 
-fn push_scores(acc: &mut ScoreAcc, ranked: &[String], relevant: &HashSet<String>, k: usize) {
-    if let Some(r) = recall_at_k(ranked, relevant, k) {
-        acc.0.push(r);
-    }
-    if let Some(ap) = average_precision_at_k(ranked, relevant, k) {
-        acc.1.push(ap);
-    }
-    if let Some(rr) = reciprocal_rank(ranked, relevant) {
-        acc.2.push(rr);
-    }
-}
-
-fn overall(cats: &HashMap<String, ScoreAcc>) -> MethodScores {
-    let mut r = Vec::new();
-    let mut m = Vec::new();
-    let mut rr = Vec::new();
-    for (a, b, c) in cats.values() {
-        r.extend(a);
-        m.extend(b);
-        rr.extend(c);
-    }
-    MethodScores {
-        recall: mean(&r),
-        map: mean(&m),
-        mrr: mean(&rr),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,10 +294,13 @@ mod tests {
 
     #[tokio::test]
     async fn harness_scores_every_category_with_fake_embedder() {
-        let report = run_eval(Arc::new(FakeEmbeddingProvider::new(384)), 5)
+        let run = run_eval(Arc::new(FakeEmbeddingProvider::new(384)), 5)
             .await
             .unwrap();
+        let report = &run.report;
         assert_eq!(report.k, 5);
+        assert!(!run.per_query.is_empty());
+        assert!(run.per_query.iter().all(|q| q.keyword.ranked.len() <= 5));
         // Every scored query category appears, and metrics are in range.
         assert!(report
             .by_category
@@ -283,6 +330,34 @@ mod tests {
             lex.keyword.recall > 0.0,
             "keyword should retrieve exact-term matches"
         );
+        let cluster = run
+            .per_query
+            .iter()
+            .find(|q| q.category == "lexical-cluster")
+            .unwrap();
+        assert!(
+            cluster.keyword.scores.ndcg.is_some(),
+            "graded query must produce nDCG"
+        );
+        let lex = run
+            .report
+            .by_category
+            .iter()
+            .find(|c| c.category == "lexical-cluster")
+            .unwrap();
+        assert!(
+            lex.keyword.ndcg.is_some(),
+            "lexical-cluster aggregate carries nDCG"
+        );
+        let cov = run
+            .per_query
+            .iter()
+            .find(|q| q.category == "coverage")
+            .unwrap();
+        assert!(
+            cov.vector.scores.recall_cov.is_some(),
+            "coverage query must produce recall@K_cov"
+        );
     }
 
     #[test]
@@ -308,5 +383,70 @@ mod tests {
                 .any(|q| q.category == "buried-fact-in-long-note"),
             "taxonomy must include buried-fact-in-long-note"
         );
+    }
+
+    #[test]
+    fn every_query_has_a_valid_set_and_resolvable_ids() {
+        let corpus = load_corpus();
+        let queries = load_queries();
+        let ids: std::collections::HashSet<&str> = corpus.iter().map(|n| n.id.as_str()).collect();
+        for q in &queries {
+            assert!(
+                q.set == "dev" || q.set == "holdout",
+                "query {:?} has invalid set {:?}",
+                q.query,
+                q.set
+            );
+            for r in &q.relevant_ids {
+                assert!(
+                    ids.contains(r.as_str()),
+                    "{:?} references unknown id {r}",
+                    q.query
+                );
+            }
+            for gid in q.grades.keys() {
+                assert!(
+                    ids.contains(gid.as_str()),
+                    "{:?} grades unknown id {gid}",
+                    q.query
+                );
+            }
+        }
+        assert!(
+            queries.iter().any(|q| q.set == "holdout"),
+            "need a holdout set"
+        );
+        assert!(queries.iter().any(|q| q.set == "dev"), "need a dev set");
+    }
+
+    #[test]
+    fn coverage_queries_have_many_relevant() {
+        for q in load_queries() {
+            if q.category == "coverage" {
+                assert!(
+                    q.relevant_ids.len() >= 4,
+                    "coverage query {:?} should have a broad answer set",
+                    q.query
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ordering_categories_carry_grades() {
+        const ORDERING: &[&str] = &[
+            "lexical-cluster",
+            "dense-near-duplicate",
+            "paraphrase-distractor",
+        ];
+        for q in load_queries() {
+            if ORDERING.contains(&q.category.as_str()) {
+                assert!(
+                    !q.grades.is_empty(),
+                    "ordering query {:?} must carry grades",
+                    q.query
+                );
+            }
+        }
     }
 }
