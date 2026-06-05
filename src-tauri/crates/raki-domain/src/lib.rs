@@ -12,6 +12,6 @@ pub use error::DomainError;
 pub use ids::NoteId;
 pub use note::Note;
 pub use ports::{
-    Completion, CompletionRequest, Embedding, EmbeddingProvider, KeywordHit, KeywordIndex,
-    LlmProvider, Locality, NoteRepository, VectorHit, VectorIndex,
+    Completion, CompletionRequest, Embedding, EmbeddingProvider, IndexingStore, KeywordHit,
+    KeywordIndex, LlmProvider, Locality, NoteRepository, PendingNote, VectorHit, VectorIndex,
 };

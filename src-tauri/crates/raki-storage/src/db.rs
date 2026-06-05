@@ -5,7 +5,9 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rusqlite::ffi::sqlite3_auto_extension;
 use rusqlite::Connection;
+use sqlite_vec::sqlite3_vec_init;
 
 use raki_domain::DomainError;
 
@@ -18,11 +20,13 @@ pub struct Database {
 
 impl Database {
     pub fn open(path: &Path) -> Result<Self, DomainError> {
+        register_sqlite_vec();
         let conn = Connection::open(path).map_err(storage_err)?;
         Self::init(conn)
     }
 
     pub fn open_in_memory() -> Result<Self, DomainError> {
+        register_sqlite_vec();
         let conn = Connection::open_in_memory().map_err(storage_err)?;
         Self::init(conn)
     }
@@ -56,6 +60,36 @@ impl Database {
     }
 }
 
+/// Register sqlite-vec as an auto-extension exactly once, before any connection
+/// opens. `sqlite3_auto_extension` applies to every connection opened afterward.
+#[allow(clippy::missing_transmute_annotations)]
+fn register_sqlite_vec() {
+    static REGISTER: std::sync::Once = std::sync::Once::new();
+    REGISTER.call_once(|| unsafe {
+        sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
+    });
+}
+
 pub(crate) fn storage_err(e: rusqlite::Error) -> DomainError {
     DomainError::Storage(e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sqlite_vec_extension_is_registered() {
+        let db = Database::open_in_memory().unwrap();
+        // vec_version() only resolves if the sqlite-vec extension loaded.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let version: String = rt.block_on(async {
+            db.call(|c| c.query_row("SELECT vec_version()", [], |r| r.get(0)))
+                .await
+                .unwrap()
+        });
+        assert!(version.starts_with('v'), "got vec_version = {version}");
+    }
 }

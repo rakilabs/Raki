@@ -15,6 +15,7 @@ pub async fn create_note(
 ) -> Result<NoteDto, AppError> {
     let note = Note::new(input.title, input.body, state.clock.now_ms());
     state.notes.upsert(&note).await?;
+    state.index.trigger(); // embed the new note in the background (single-flight)
     Ok(NoteDto::from(note))
 }
 

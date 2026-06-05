@@ -4,17 +4,21 @@
 mod commands;
 mod dto;
 mod error;
+mod indexing;
 mod state;
 
 use std::sync::Arc;
 
 use tauri::Manager;
 
-use raki_ai::{EgressPolicy, FakeEmbeddingProvider};
-use raki_domain::Clock;
-use raki_storage::{Database, SqliteKeywordIndex, SqliteNoteRepository};
+use raki_ai::{EgressPolicy, FakeEmbeddingProvider, FastEmbedProvider};
+use raki_domain::{Clock, EmbeddingProvider, IndexingStore, VectorIndex};
+use raki_storage::{
+    Database, SqliteIndexingStore, SqliteKeywordIndex, SqliteNoteRepository, SqliteVectorIndex,
+};
 
 use crate::commands::notes::{create_note, get_note, list_notes, search_notes};
+use crate::indexing::IndexingService;
 use crate::state::AppState;
 
 /// A system clock. Lives in the composition root so the domain stays IO-free.
@@ -37,15 +41,32 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             let db = Database::open(&dir.join("raki.sqlite"))?;
+
             let notes = Arc::new(SqliteNoteRepository::new(db.clone()));
-            let keyword = Arc::new(SqliteKeywordIndex::new(db));
+            let keyword = Arc::new(SqliteKeywordIndex::new(db.clone()));
+            let vectors: Arc<dyn VectorIndex> = Arc::new(SqliteVectorIndex::new(db.clone()));
+            let store: Arc<dyn IndexingStore> = Arc::new(SqliteIndexingStore::new(db));
+
+            // Real embeddings if the model is available; otherwise degrade to the fake
+            // so the app still runs (keyword search is unaffected). The model-id
+            // staleness check re-embeds with the real model once it's available.
+            let embedder: Arc<dyn EmbeddingProvider> = match FastEmbedProvider::try_new() {
+                Ok(p) => Arc::new(p),
+                Err(e) => {
+                    eprintln!("fastembed unavailable ({e}); using fake embeddings this session");
+                    Arc::new(FakeEmbeddingProvider::new(384))
+                }
+            };
+
+            let index = Arc::new(IndexingService::new(store, embedder, vectors));
+            index.trigger(); // startup catch-up pass (backfill + drain), single-flight
 
             app.manage(AppState {
                 notes,
                 keyword,
                 clock: Arc::new(SystemClock),
-                embedder: Arc::new(FakeEmbeddingProvider::new(384)),
                 egress: EgressPolicy::LocalOnly,
+                index,
             });
             Ok(())
         })

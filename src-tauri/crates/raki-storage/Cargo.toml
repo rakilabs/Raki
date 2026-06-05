@@ -9,4 +9,6 @@ raki-domain = { workspace = true }
 serde = { workspace = true }
 async-trait = { workspace = true }
 rusqlite = { workspace = true }
+sqlite-vec = "=0.1.10-alpha.4"
 tokio = { workspace = true }
+unicode-normalization = "0.1"

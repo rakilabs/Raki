@@ -38,6 +38,10 @@ impl EmbeddingProvider for FakeEmbeddingProvider {
         Locality::Local
     }
 
+    fn model_id(&self) -> String {
+        format!("fake-{}", self.dim)
+    }
+
     async fn embed(&self, inputs: &[String]) -> Result<Vec<Embedding>, DomainError> {
         Ok(inputs
             .iter()

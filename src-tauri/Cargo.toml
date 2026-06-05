@@ -48,3 +48,4 @@ raki-storage = { workspace = true }
 raki-retrieval = { workspace = true }
 raki-ai = { workspace = true }
 raki-memory = { workspace = true }
+tokio = { workspace = true }

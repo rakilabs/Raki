@@ -29,6 +29,9 @@ pub trait NoteRepository: Send + Sync {
 pub trait EmbeddingProvider: Send + Sync {
     fn dimension(&self) -> usize;
     fn locality(&self) -> Locality;
+    /// Stable identifier of the model+version. Drives embedding staleness: changing
+    /// it re-embeds the whole corpus.
+    fn model_id(&self) -> String;
     async fn embed(&self, inputs: &[String]) -> Result<Vec<Embedding>, DomainError>;
 }
 
@@ -69,4 +72,37 @@ pub trait KeywordIndex: Send + Sync {
     /// Best-first keyword hits for `query`, at most `k`. Read-only — index writes
     /// happen transactionally inside the repository, not here.
     async fn query(&self, query: &str, k: usize) -> Result<Vec<KeywordHit>, DomainError>;
+}
+
+/// A note awaiting (re)embedding: its id, the text to embed, and the content hash
+/// that text corresponds to (used for the compare-and-stamp guard).
+pub struct PendingNote {
+    pub id: NoteId,
+    pub text: String,
+    pub content_hash: String,
+}
+
+#[async_trait]
+pub trait IndexingStore: Send + Sync {
+    /// One-time: populate `content_hash` for any rows missing it (pre-V3 notes).
+    /// Idempotent; a no-op once every live note has a hash.
+    async fn backfill_content_hashes(&self) -> Result<(), DomainError>;
+
+    /// Live notes whose embedding is missing or stale for `model_id`, at most `limit`.
+    async fn list_pending(
+        &self,
+        model_id: &str,
+        limit: usize,
+    ) -> Result<Vec<PendingNote>, DomainError>;
+
+    /// Compare-and-stamp: mark `id` embedded for (`content_hash`, `model_id`) ONLY if
+    /// the note's CURRENT content_hash still equals `content_hash`. Returns `true` if
+    /// it stamped, `false` if the content changed since `content_hash` was computed
+    /// (the note stays stale and re-embeds next pass — never stamp stale as current).
+    async fn mark_embedded(
+        &self,
+        id: &NoteId,
+        content_hash: &str,
+        model_id: &str,
+    ) -> Result<bool, DomainError>;
 }

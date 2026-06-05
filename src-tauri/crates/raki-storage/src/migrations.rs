@@ -24,6 +24,15 @@ const MIGRATIONS: &[&str] = &[
     );
     INSERT INTO notes_fts (note_id, title, body)
         SELECT id, title, body FROM notes WHERE deleted_at IS NULL;",
+    // V3: semantic vector index (sqlite-vec) + embedding staleness tracking on notes.
+    // note_vectors is a vec0 virtual table; the embedding pipeline keeps it in sync.
+    "CREATE VIRTUAL TABLE note_vectors USING vec0(
+        note_id TEXT PRIMARY KEY,
+        embedding float[384]
+    );
+    ALTER TABLE notes ADD COLUMN content_hash TEXT;
+    ALTER TABLE notes ADD COLUMN embedded_hash TEXT;
+    ALTER TABLE notes ADD COLUMN embedded_model TEXT;",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
@@ -54,5 +63,34 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn migration_creates_note_vectors_and_columns() {
+        let db = Database::open_in_memory().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            // note_vectors vec0 table exists and is queryable
+            let v: i64 = db
+                .call(|c| c.query_row("SELECT count(*) FROM note_vectors", [], |r| r.get(0)))
+                .await
+                .unwrap();
+            assert_eq!(v, 0);
+            // the three staleness columns exist on notes
+            let cols: i64 = db
+                .call(|c| {
+                    c.query_row(
+                        "SELECT count(*) FROM pragma_table_info('notes')
+                         WHERE name IN ('content_hash','embedded_hash','embedded_model')",
+                        [],
+                        |r| r.get(0),
+                    )
+                })
+                .await
+                .unwrap();
+            assert_eq!(cols, 3);
+        });
     }
 }

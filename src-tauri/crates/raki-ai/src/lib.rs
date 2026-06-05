@@ -2,6 +2,8 @@
 
 mod egress;
 mod fake;
+mod fastembed;
 
 pub use egress::EgressPolicy;
 pub use fake::FakeEmbeddingProvider;
+pub use fastembed::FastEmbedProvider;
