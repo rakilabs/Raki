@@ -2,3 +2,5 @@ node_modules
 dist
 .DS_Store
 src-tauri/crates/raki-ai/.fastembed_cache/
+# Real-data eval: private personal notes + labeled queries. NEVER commit.
+eval-data/

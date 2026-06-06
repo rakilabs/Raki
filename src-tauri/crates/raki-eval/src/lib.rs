@@ -4,6 +4,9 @@
 
 use std::collections::HashMap;
 
+pub mod local_corpus;
+pub mod markdown;
+pub mod realmetrics;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -13,9 +16,10 @@ pub struct CorpusNote {
     pub body: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct EvalQuery {
     pub query: String,
+    #[serde(default = "default_category")]
     pub category: String,
     /// "dev" (used while tuning) or "holdout" (run only by the gate). Defaults to "dev".
     #[serde(default = "default_set")]
@@ -25,6 +29,14 @@ pub struct EvalQuery {
     /// Optional graded relevance (fixture id → grade). Absent ⇒ binary; nDCG dormant.
     #[serde(default)]
     pub grades: HashMap<String, f64>,
+    /// Optional single best answer (real-data tier). Mark ONLY when unambiguous. Drives
+    /// Primary-Success@1; absent ⇒ excluded from that metric.
+    #[serde(default)]
+    pub primary: Option<String>,
+}
+
+fn default_category() -> String {
+    "real".to_string()
 }
 
 fn default_set() -> String {
@@ -241,14 +253,15 @@ const RERANK_POOL: usize = 20;
 /// Build a fresh in-memory index from the golden set, embed every document directly,
 /// then score keyword and vector retrieval per query. Returns aggregated metrics
 /// plus per-query detail.
-pub async fn run_eval(
+/// Run the eval over a CALLER-SUPPLIED corpus + queries (the synthetic fixtures, or a local
+/// real-notes set). All retrieval/scoring logic lives here; `run_eval` is the fixture wrapper.
+pub async fn run_eval_over(
+    corpus: &[CorpusNote],
+    queries: &[EvalQuery],
     embedder: Arc<dyn EmbeddingProvider>,
     reranker: Arc<dyn Reranker>,
     k: usize,
 ) -> Result<EvalRun, DomainError> {
-    let corpus = load_corpus();
-    let queries = load_queries();
-
     let db = Database::open_in_memory()?;
     let repo = SqliteNoteRepository::new(db.clone());
     let keyword = SqliteKeywordIndex::new(db.clone());
@@ -281,7 +294,7 @@ pub async fn run_eval(
     let mut per_query: Vec<QueryResult> = Vec::new();
     let mut unscored: HashSet<String> = HashSet::new();
 
-    for q in &queries {
+    for q in queries {
         if q.relevant_ids.is_empty() {
             unscored.insert(q.category.clone());
             continue;
@@ -348,6 +361,15 @@ pub async fn run_eval(
 
     let report = aggregate(&per_query, &mut unscored, k);
     Ok(EvalRun { report, per_query })
+}
+
+/// Eval over the committed synthetic fixtures (the smoke/regression tier).
+pub async fn run_eval(
+    embedder: Arc<dyn EmbeddingProvider>,
+    reranker: Arc<dyn Reranker>,
+    k: usize,
+) -> Result<EvalRun, DomainError> {
+    run_eval_over(&load_corpus(), &load_queries(), embedder, reranker, k).await
 }
 
 fn truncate(ids: &[String], k: usize) -> Vec<String> {
@@ -629,6 +651,23 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn eval_query_parses_optional_primary_and_default_category() {
+        // category omitted → defaults; primary present.
+        let q: EvalQuery =
+            serde_json::from_str(r#"{ "query": "q", "relevant_ids": ["a","b"], "primary": "a" }"#)
+                .unwrap();
+        assert_eq!(q.category, "real");
+        assert_eq!(q.primary.as_deref(), Some("a"));
+        // primary omitted → None.
+        let q2: EvalQuery = serde_json::from_str(
+            r#"{ "query": "q2", "category": "exact", "relevant_ids": ["c"] }"#,
+        )
+        .unwrap();
+        assert_eq!(q2.category, "exact");
+        assert_eq!(q2.primary, None);
     }
 
     #[test]

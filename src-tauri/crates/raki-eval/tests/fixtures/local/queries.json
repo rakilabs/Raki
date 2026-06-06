@@ -1,0 +1,4 @@
+[
+  { "query": "why is my espresso sour", "relevant_ids": ["alpha"], "primary": "alpha", "category": "vague" },
+  { "query": "bread did not rise", "relevant_ids": ["beta"], "category": "exact" }
+]
