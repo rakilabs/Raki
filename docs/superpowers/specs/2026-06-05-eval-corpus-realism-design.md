@@ -9,10 +9,10 @@ authored by the same person who knows the fixes it must prove. The work was spli
 - **Slice 3a — Evaluator & Protocol Hardening** (`2026-06-05-eval-protocol-hardening-3a-design.md`):
   build and lock the instrument first (qrel semantics, graded nDCG, labeling rubric,
   dev/locked split, committed baseline artifact, per-method gate, label audit).
-- **Slice 3b — this document**, to be REWRITTEN under 3a's protocol before implementation:
-  author adversarial notes into the dev set, hold the locked set out, report what the
-  trusted evaluator shows (reframed from "make vector fail" to "build a locked, realistic
-  challenge set"). Do not implement from the text below as-is.
+- **Slice 3b — REWRITTEN under 3a's protocol** at
+  `2026-06-06-adversarial-retrieval-regression-3b-design.md` (the approved spec; retitled from
+  "corpus realism" after an adversarial review). Implement from that file, **not** the text
+  below, which is retained for history only.
 
 The original (pre-split) text is retained below for history only.
 
