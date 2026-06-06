@@ -1,0 +1,48 @@
+name: eval
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  deterministic:
+    name: deterministic gate (required, no model)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Runs loader invariants, the fake-embedder harness, and the keyword per-query
+      # snapshot gate — all model-independent, so this job always means something.
+      - run: cargo test --workspace
+
+  real-model:
+    name: real-model eval (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true # GitHub runners don't guarantee the model cache (spec D9)
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      # fastembed caches the model under the working dir on first download; cache it
+      # across runs. Adjust the path if the cache location differs in CI logs.
+      - name: Cache fastembed model
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/.fastembed_cache
+          key: fastembed-bge-small-en-v1.5
+      - run: cargo test -p raki-eval --test eval_gate -- --ignored
