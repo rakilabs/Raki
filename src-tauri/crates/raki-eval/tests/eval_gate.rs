@@ -14,17 +14,19 @@ use std::sync::Arc;
 use raki_ai::{FakeEmbeddingProvider, FastEmbedProvider};
 use raki_eval::{load_snapshot, run_eval, snapshot_regressions, Method, MethodScores, QueryResult};
 
-// Per-method recall@3 / MAP@3 floors over NON-COVERAGE scored queries, calibrated
-// 2026-06-05 ~0.10 below observed (kw ~0.85, vec/hyb ~1.00 non-coverage). Ratchet UP only.
-const KW_RECALL_FLOOR: f64 = 0.75;
-const KW_MAP_FLOOR: f64 = 0.75;
-const VEC_RECALL_FLOOR: f64 = 0.90;
-const VEC_MAP_FLOOR: f64 = 0.90;
-const HYB_RECALL_FLOOR: f64 = 0.90;
-const HYB_MAP_FLOOR: f64 = 0.90;
-// Coverage recall@10 floor (vec/hyb observed 1.00). nDCG@3 floor for ordering (observed 0.92 vec/hyb).
-const COVERAGE_RECALL10_FLOOR: f64 = 0.85;
-const ORDERING_NDCG_FLOOR: f64 = 0.80;
+// Re-baselined for hardened corpus 3b, 2026-06-06: floors ~0.10 below the observed
+// OVERALL on the 30-note / 25-query corpus. One-time downward recalibration (the test got
+// harder, ADR-0005 §ratchet); up-only ratcheting resumes. Per-query snapshots guard rot.
+// Observed non-coverage: kw recall~0.89 MAP~0.83 | vec/hyb recall~1.00 MAP~0.98.
+// Observed coverage recall@10 = 1.00. Observed ordering nDCG min = 0.91 (paraphrase-distractor).
+const KW_RECALL_FLOOR: f64 = 0.75; // ~0.14 below observed kw non-coverage recall
+const KW_MAP_FLOOR: f64 = 0.70; // ~0.13 below observed kw non-coverage MAP
+const VEC_RECALL_FLOOR: f64 = 0.90; // ~0.10 below observed vec non-coverage recall
+const VEC_MAP_FLOOR: f64 = 0.90; // ~0.08 below observed vec non-coverage MAP
+const HYB_RECALL_FLOOR: f64 = 0.90; // ~0.10 below observed hyb non-coverage recall
+const HYB_MAP_FLOOR: f64 = 0.90; // ~0.08 below observed hyb non-coverage MAP
+const COVERAGE_RECALL10_FLOOR: f64 = 0.85; // ~0.15 below observed coverage recall@10
+const ORDERING_NDCG_FLOOR: f64 = 0.80; // ~0.11 below the MIN observed nDCG across the 3 ordering cats
 
 fn mean(it: impl Iterator<Item = f64>) -> f64 {
     let (sum, n) = it.fold((0.0, 0usize), |(s, n), v| (s + v, n + 1));
@@ -103,7 +105,15 @@ async fn real_model_gate() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // D8: ordering categories floored on nDCG@3 (vec + hyb).
-    for q in pq.iter().filter(|q| q.category == "lexical-cluster") {
+    const ORDERING: &[&str] = &[
+        "lexical-cluster",
+        "dense-near-duplicate",
+        "paraphrase-distractor",
+    ];
+    for q in pq
+        .iter()
+        .filter(|q| ORDERING.contains(&q.category.as_str()))
+    {
         for m in [Method::Vector, Method::Hybrid] {
             let n = q.method(m).scores.ndcg.expect("ordering nDCG present");
             assert!(
