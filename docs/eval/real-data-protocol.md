@@ -20,7 +20,19 @@ Setup: put `.md` notes in `eval-data/real/notes/`, write `eval-data/real/queries
 
 ## Cadence (D8)
 Re-run **monthly for the first quarter, then quarterly**, updating the baseline. A lapsed
- cadence is the main way this eval rots.
+cadence is the main way this eval rots.
+
+### Next-due tracker
+Tick a box after each run and set the matching OS/calendar reminder (a multi-month cadence
+can't live in an ephemeral scheduler — this checklist + a calendar entry is the durable form).
+Re-running early is fine; the dates are the *latest* a run should slip to.
+
+- [ ] 2026-07-06 — monthly (Q1)
+- [ ] 2026-08-06 — monthly (Q1)
+- [ ] 2026-09-06 — monthly (Q1, last monthly)
+- [ ] 2026-12-06 — quarterly
+- [ ] 2027-03-06 — quarterly
+- [ ] 2027-06-06 — quarterly (then continue quarterly)
 
 ## What the numbers are NOT
 Directional, not statistically powered (~20–40 queries); optimistic ceiling (authorship bias);
