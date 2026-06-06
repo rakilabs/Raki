@@ -33,6 +33,14 @@ raki-retrieval = { path = "crates/raki-retrieval" }
 raki-ai = { path = "crates/raki-ai" }
 raki-memory = { path = "crates/raki-memory" }
 
+# The published sqlite-vec 0.1.10-alpha.4 crate is mis-packaged: its sqlite-vec.c
+# `#include`s sqlite-vec-{diskann,ivf,ivf-kmeans,rescore}.c, but the tarball ships
+# none of them, so a clean build fails everywhere (CI, fresh clones). No fixed
+# version exists on crates.io. We vendor the complete source (those four files added)
+# and override the registry crate with it so every build is reproducible.
+[patch.crates-io]
+sqlite-vec = { path = "vendor/sqlite-vec" }
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

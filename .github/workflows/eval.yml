@@ -3,6 +3,7 @@ name: eval
 on:
   push:
   pull_request:
+  workflow_dispatch: # manual trigger for the real-model job (see below)
 
 jobs:
   deterministic:
@@ -20,15 +21,22 @@ jobs:
         with:
           workspaces: src-tauri
       - run: cargo fmt --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Exclude the `raki` Tauri app crate: it needs GTK/webkit system libs the runner
+      # lacks, and the eval gate is GUI-independent. App-crate CI is a separate concern.
+      - run: cargo clippy --workspace --exclude raki --all-targets -- -D warnings
       # Runs loader invariants, the fake-embedder harness, and the keyword per-query
       # snapshot gate — all model-independent, so this job always means something.
-      - run: cargo test --workspace
+      - run: cargo test --workspace --exclude raki
 
   real-model:
-    name: real-model eval (non-blocking)
+    name: real-model eval (manual)
+    # Manual-only (workflow_dispatch): stock runners don't have the bge model cached, so
+    # this would download the model + onnxruntime on every push — slow and flaky for a
+    # non-blocking job. Run it on demand (or from a runner with a warm model cache). The
+    # deterministic gate above is the always-on, required protection (spec D9).
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
-    continue-on-error: true # GitHub runners don't guarantee the model cache (spec D9)
+    continue-on-error: true
     defaults:
       run:
         working-directory: src-tauri
