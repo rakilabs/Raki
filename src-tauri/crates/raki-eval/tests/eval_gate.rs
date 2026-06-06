@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use raki_ai::{FakeEmbeddingProvider, FastEmbedProvider};
+use raki_ai::{FakeEmbeddingProvider, FakeReranker, FastEmbedProvider, FastEmbedReranker};
 use raki_eval::{load_snapshot, run_eval, snapshot_regressions, Method, MethodScores, QueryResult};
 
 // Re-baselined for hardened corpus 3b, 2026-06-06: floors ~0.10 below the observed
@@ -27,6 +27,11 @@ const HYB_RECALL_FLOOR: f64 = 0.90; // ~0.10 below observed hyb non-coverage rec
 const HYB_MAP_FLOOR: f64 = 0.90; // ~0.08 below observed hyb non-coverage MAP
 const COVERAGE_RECALL10_FLOOR: f64 = 0.85; // ~0.15 below observed coverage recall@10
 const ORDERING_NDCG_FLOOR: f64 = 0.80; // ~0.11 below the MIN observed nDCG across the 3 ordering cats
+
+// Slice 4 (additive): reranked = hybrid + rerank. Floors ~0.10 below observed; existing
+// floors are unchanged (this is not a downward re-baseline of the others). Measure-then-floor.
+const RR_RECALL_FLOOR: f64 = 0.90; // ~0.08 below observed reranked non-coverage recall (~0.98)
+const RR_MAP_FLOOR: f64 = 0.90; // ~0.06 below observed reranked non-coverage MAP (~0.96)
 
 fn mean(it: impl Iterator<Item = f64>) -> f64 {
     let (sum, n) = it.fold((0.0, 0usize), |(s, n), v| (s + v, n + 1));
@@ -48,7 +53,12 @@ fn noncov_mean(per_query: &[QueryResult], m: Method, f: fn(&MethodScores) -> f64
 
 #[tokio::test]
 async fn keyword_snapshot_is_deterministic() -> Result<(), Box<dyn std::error::Error>> {
-    let run = run_eval(Arc::new(FakeEmbeddingProvider::new(384)), 3).await?;
+    let run = run_eval(
+        Arc::new(FakeEmbeddingProvider::new(384)),
+        Arc::new(FakeReranker),
+        3,
+    )
+    .await?;
     let baseline = load_snapshot()?;
     let regressions = snapshot_regressions(&run.per_query, &baseline, &[Method::Keyword]);
     assert!(
@@ -62,12 +72,20 @@ async fn keyword_snapshot_is_deterministic() -> Result<(), Box<dyn std::error::E
 #[tokio::test]
 #[ignore = "runs the real bge model (network + native runtime); run with --ignored"]
 async fn real_model_gate() -> Result<(), Box<dyn std::error::Error>> {
-    let run = run_eval(Arc::new(FastEmbedProvider::try_new()?), 3).await?;
+    let run = run_eval(
+        Arc::new(FastEmbedProvider::try_new()?),
+        Arc::new(FastEmbedReranker::try_new()?),
+        3,
+    )
+    .await?;
     let baseline = load_snapshot()?;
 
-    // D5: no vector/hybrid query regresses (keyword already covered deterministically).
-    let regressions =
-        snapshot_regressions(&run.per_query, &baseline, &[Method::Vector, Method::Hybrid]);
+    // D5: no vector/hybrid/reranked query regresses (keyword already covered deterministically).
+    let regressions = snapshot_regressions(
+        &run.per_query,
+        &baseline,
+        &[Method::Vector, Method::Hybrid, Method::Reranked],
+    );
     assert!(
         regressions.is_empty(),
         "vec/hyb regressions:\n{}",
@@ -80,6 +98,7 @@ async fn real_model_gate() -> Result<(), Box<dyn std::error::Error>> {
         (Method::Keyword, KW_RECALL_FLOOR, KW_MAP_FLOOR),
         (Method::Vector, VEC_RECALL_FLOOR, VEC_MAP_FLOOR),
         (Method::Hybrid, HYB_RECALL_FLOOR, HYB_MAP_FLOOR),
+        (Method::Reranked, RR_RECALL_FLOOR, RR_MAP_FLOOR),
     ] {
         let r = noncov_mean(pq, m, |s| s.recall);
         let mp = noncov_mean(pq, m, |s| s.map);
@@ -104,7 +123,7 @@ async fn real_model_gate() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // D8: ordering categories floored on nDCG@3 (vec + hyb).
+    // D8: ordering categories floored on nDCG@3 (vec + hyb + rr).
     const ORDERING: &[&str] = &[
         "lexical-cluster",
         "dense-near-duplicate",
@@ -114,7 +133,7 @@ async fn real_model_gate() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .filter(|q| ORDERING.contains(&q.category.as_str()))
     {
-        for m in [Method::Vector, Method::Hybrid] {
+        for m in [Method::Vector, Method::Hybrid, Method::Reranked] {
             let n = q.method(m).scores.ndcg.expect("ordering nDCG present");
             assert!(
                 n >= ORDERING_NDCG_FLOOR,

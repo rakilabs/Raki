@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
-use raki_ai::FastEmbedProvider;
-use raki_domain::EmbeddingProvider;
+use raki_ai::{FastEmbedProvider, FastEmbedReranker};
+use raki_domain::{EmbeddingProvider, Reranker};
 use raki_eval::{eval_dir, fixtures_fingerprint, run_eval, EvalRun, MethodScores};
 
 fn fmt_opt(o: Option<f64>) -> String {
@@ -13,9 +13,9 @@ fn fmt_opt(o: Option<f64>) -> String {
         .unwrap_or_else(|| "  - ".to_string())
 }
 
-fn row(label: &str, kw: MethodScores, vc: MethodScores, hy: MethodScores) {
+fn row(label: &str, kw: MethodScores, vc: MethodScores, hy: MethodScores, rr: MethodScores) {
     println!(
-        "{label:<24} | kw R{:.2} M{:.2} N{} Cov{} | vec R{:.2} M{:.2} N{} Cov{} | hyb R{:.2} M{:.2} N{} Cov{}",
+        "{label:<24} | kw R{:.2} M{:.2} N{} Cov{} | vec R{:.2} M{:.2} N{} Cov{} | hyb R{:.2} M{:.2} N{} Cov{} | rr R{:.2} M{:.2} N{} Cov{}",
         kw.recall,
         kw.map,
         fmt_opt(kw.ndcg),
@@ -28,6 +28,10 @@ fn row(label: &str, kw: MethodScores, vc: MethodScores, hy: MethodScores) {
         hy.map,
         fmt_opt(hy.ndcg),
         fmt_opt(hy.recall_cov),
+        rr.recall,
+        rr.map,
+        fmt_opt(rr.ndcg),
+        fmt_opt(rr.recall_cov),
     );
 }
 
@@ -42,9 +46,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .to_string();
 
     let embedder = Arc::new(FastEmbedProvider::try_new()?);
+    let reranker = Arc::new(FastEmbedReranker::try_new()?);
     let model_id = embedder.model_id();
+    let reranker_id = reranker.model_id();
     let k = 3;
-    let run = run_eval(embedder, k).await?;
+    let run = run_eval(embedder, reranker, k).await?;
     let report = &run.report;
 
     println!("Retrieval eval @ k={k}  (R=recall  M=MAP  N=nDCG  Cov=recall@10)\n");
@@ -54,15 +60,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             c.keyword,
             c.vector,
             c.hybrid,
+            c.reranked,
         );
     }
-    println!("{}", "-".repeat(120));
+    println!("{}", "-".repeat(148));
     row(
         "OVERALL",
         report.overall_keyword,
         report.overall_vector,
         report.overall_hybrid,
+        report.overall_reranked,
     );
+
+    println!(
+        "\nreranked = hybrid + rerank ({reranker_id}). nDCG delta vs hybrid (graded categories):"
+    );
+    for c in report
+        .by_category
+        .iter()
+        .filter(|c| c.hybrid.ndcg.is_some())
+    {
+        if let (Some(rr), Some(hy)) = (c.reranked.ndcg, c.hybrid.ndcg) {
+            println!("  {:<24} {:+.3}", c.category, rr - hy);
+        }
+    }
 
     println!("\nPer-query (dev set only):");
     for q in run.per_query.iter().filter(|q| q.set == "dev") {
@@ -70,6 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("    kw  {:?}", q.keyword.ranked);
         println!("    vec {:?}", q.vector.ranked);
         println!("    hyb {:?}", q.hybrid.ranked);
+        println!("    rr  {:?}", q.reranked.ranked);
     }
     if !report.unscored_categories.is_empty() {
         println!(
@@ -79,12 +101,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if write {
-        write_artifacts(&run, &model_id, &date)?;
+        write_artifacts(&run, &model_id, &reranker_id, &date)?;
     }
     Ok(())
 }
 
-fn write_artifacts(run: &EvalRun, model_id: &str, date: &str) -> std::io::Result<()> {
+fn write_artifacts(
+    run: &EvalRun,
+    model_id: &str,
+    reranker_id: &str,
+    date: &str,
+) -> std::io::Result<()> {
     let dir = eval_dir();
     std::fs::create_dir_all(&dir)?;
 
@@ -94,7 +121,10 @@ fn write_artifacts(run: &EvalRun, model_id: &str, date: &str) -> std::io::Result
     std::fs::write(dir.join("snapshot.json"), snap)?;
 
     // D10: human-readable baseline artifact.
-    std::fs::write(dir.join("baseline.md"), baseline_md(run, model_id, date))?;
+    std::fs::write(
+        dir.join("baseline.md"),
+        baseline_md(run, model_id, reranker_id, date),
+    )?;
     eprintln!(
         "wrote {}/snapshot.json and {}/baseline.md",
         dir.display(),
@@ -103,7 +133,7 @@ fn write_artifacts(run: &EvalRun, model_id: &str, date: &str) -> std::io::Result
     Ok(())
 }
 
-fn baseline_md(run: &EvalRun, model_id: &str, date: &str) -> String {
+fn baseline_md(run: &EvalRun, model_id: &str, reranker_id: &str, date: &str) -> String {
     use std::fmt::Write;
     let r = &run.report;
     let mut s = String::with_capacity(2048);
@@ -113,6 +143,7 @@ fn baseline_md(run: &EvalRun, model_id: &str, date: &str) -> String {
     s.push_str("numbers; the per-query lock is `snapshot.json` (D5).\n\n");
     s.push_str("## Environment\n\n");
     writeln!(s, "- Model id: `{model_id}`").unwrap();
+    writeln!(s, "- Reranker model id: `{reranker_id}`").unwrap();
     s.push_str("- Embedding dimension: 384 (fixed by bge-small-en-v1.5; pinned by model id)\n");
     writeln!(
         s,
@@ -140,27 +171,29 @@ fn baseline_md(run: &EvalRun, model_id: &str, date: &str) -> String {
         "`coverage_k = 10` rationale: top-10 spans ~45% of the 22-note corpus — a sensible\n",
     );
     s.push_str("\"find most\" horizon. Revisit when the corpus grows (3b).\n\n");
-    s.push_str("## Per-category (kw / vec / hyb)\n\n");
-    s.push_str("| category | n | kw R/M/N/Cov | vec R/M/N/Cov | hyb R/M/N/Cov |\n");
-    s.push_str("|---|---|---|---|---|\n");
+    s.push_str("## Per-category (kw / vec / hyb / rr)\n\n");
+    s.push_str("| category | n | kw R/M/N/Cov | vec R/M/N/Cov | hyb R/M/N/Cov | rr R/M/N/Cov |\n");
+    s.push_str("|---|---|---|---|---|---|\n");
     for c in &r.by_category {
         writeln!(
             s,
-            "| {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} |",
             c.category,
             c.scored,
             cell(c.keyword),
             cell(c.vector),
-            cell(c.hybrid)
+            cell(c.hybrid),
+            cell(c.reranked)
         )
         .unwrap();
     }
     writeln!(
         s,
-        "| **OVERALL** |  | {} | {} | {} |\n",
+        "| **OVERALL** |  | {} | {} | {} | {} |\n",
         cell(r.overall_keyword),
         cell(r.overall_vector),
-        cell(r.overall_hybrid)
+        cell(r.overall_hybrid),
+        cell(r.overall_reranked)
     )
     .unwrap();
     writeln!(s, "Unscored categories: {:?}", r.unscored_categories).unwrap();

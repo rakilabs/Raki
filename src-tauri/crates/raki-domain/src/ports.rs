@@ -43,6 +43,30 @@ pub trait EmbeddingProvider: Send + Sync {
     async fn embed(&self, inputs: &[String]) -> Result<Vec<Embedding>, DomainError>;
 }
 
+/// A cross-encoder relevance score for one candidate document. `index` is the position
+/// in the `documents` slice passed to `rerank`; `score` is higher = more relevant.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RerankScore {
+    pub index: usize,
+    pub score: f32,
+}
+
+/// A cross-encoder reranker: reads each (query, document) pair jointly and scores relevance.
+/// Mirrors `EmbeddingProvider` as a port; adapters live in `raki-ai`.
+#[async_trait]
+pub trait Reranker: Send + Sync {
+    fn locality(&self) -> Locality;
+    /// Stable identifier of the reranker model+version (recorded in the eval baseline).
+    fn model_id(&self) -> String;
+    /// Score every document against the query. Returns one `RerankScore` per input document
+    /// (order unspecified — the caller sorts by score). Higher score = more relevant.
+    async fn rerank(
+        &self,
+        query: &str,
+        documents: &[String],
+    ) -> Result<Vec<RerankScore>, DomainError>;
+}
+
 // --- Ports defined for the architecture; implemented in later plans. ---
 
 pub struct CompletionRequest {
@@ -113,4 +137,52 @@ pub trait IndexingStore: Send + Sync {
         content_hash: &str,
         model_id: &str,
     ) -> Result<bool, DomainError>;
+}
+
+#[cfg(test)]
+mod reranker_tests {
+    use super::*;
+
+    struct StubReranker;
+    #[async_trait]
+    impl Reranker for StubReranker {
+        fn locality(&self) -> Locality {
+            Locality::Local
+        }
+        fn model_id(&self) -> String {
+            "stub".to_string()
+        }
+        async fn rerank(
+            &self,
+            _query: &str,
+            documents: &[String],
+        ) -> Result<Vec<RerankScore>, DomainError> {
+            Ok(documents
+                .iter()
+                .enumerate()
+                .map(|(i, _)| RerankScore {
+                    index: i,
+                    score: i as f32,
+                })
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn reranker_is_object_safe_and_scores_each_doc() {
+        let r: &dyn Reranker = &StubReranker;
+        let out = r
+            .rerank("q", &["a".to_string(), "b".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(
+            out[1],
+            RerankScore {
+                index: 1,
+                score: 1.0
+            }
+        );
+        assert_eq!(r.locality(), Locality::Local);
+    }
 }

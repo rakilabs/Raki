@@ -13,5 +13,6 @@ pub use ids::NoteId;
 pub use note::Note;
 pub use ports::{
     Completion, CompletionRequest, Embedding, EmbeddingProvider, IndexingStore, KeywordHit,
-    KeywordIndex, LlmProvider, Locality, NoteRepository, PendingNote, VectorHit, VectorIndex,
+    KeywordIndex, LlmProvider, Locality, NoteRepository, PendingNote, RerankScore, Reranker,
+    VectorHit, VectorIndex,
 };

@@ -45,10 +45,12 @@ pub fn load_queries() -> Vec<EvalQuery> {
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use raki_domain::{DomainError, EmbeddingProvider, Note, NoteId, NoteRepository, VectorIndex};
+use raki_domain::{
+    DomainError, EmbeddingProvider, Note, NoteId, NoteRepository, Reranker, VectorIndex,
+};
 use raki_retrieval::{
-    average_precision_at_k, hybrid_search, ndcg_at_k, recall_at_k, reciprocal_rank, search,
-    vector_search,
+    average_precision_at_k, hybrid_candidates, hybrid_search, ndcg_at_k, recall_at_k,
+    reciprocal_rank, rerank, search, vector_search,
 };
 use raki_storage::{Database, SqliteKeywordIndex, SqliteNoteRepository, SqliteVectorIndex};
 
@@ -72,6 +74,7 @@ pub struct CategoryReport {
     pub keyword: MethodScores,
     pub vector: MethodScores,
     pub hybrid: MethodScores,
+    pub reranked: MethodScores,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +83,7 @@ pub struct Report {
     pub overall_keyword: MethodScores,
     pub overall_vector: MethodScores,
     pub overall_hybrid: MethodScores,
+    pub overall_reranked: MethodScores,
     pub by_category: Vec<CategoryReport>,
     /// Categories with no relevant labels (e.g. `negative`): tracked, not scored in v1
     /// (true-negative precision needs a score threshold we don't have yet).
@@ -103,6 +107,7 @@ pub struct QueryResult {
     pub keyword: MethodResult,
     pub vector: MethodResult,
     pub hybrid: MethodResult,
+    pub reranked: MethodResult,
 }
 
 /// Which retrieval method a snapshot check targets. The deterministic gate checks
@@ -112,6 +117,7 @@ pub enum Method {
     Keyword,
     Vector,
     Hybrid,
+    Reranked,
 }
 
 impl QueryResult {
@@ -120,6 +126,7 @@ impl QueryResult {
             Method::Keyword => &self.keyword,
             Method::Vector => &self.vector,
             Method::Hybrid => &self.hybrid,
+            Method::Reranked => &self.reranked,
         }
     }
 }
@@ -227,11 +234,16 @@ pub struct EvalRun {
 
 const COVERAGE_K: usize = 10;
 
+/// Candidate depth the reranker reorders — the recall union pulled before rerank. Mirrors
+/// `raki_retrieval::HYBRID_CANDIDATE_POOL`; production may later use a latency-bounded window.
+const RERANK_POOL: usize = 20;
+
 /// Build a fresh in-memory index from the golden set, embed every document directly,
 /// then score keyword and vector retrieval per query. Returns aggregated metrics
 /// plus per-query detail.
 pub async fn run_eval(
     embedder: Arc<dyn EmbeddingProvider>,
+    reranker: Arc<dyn Reranker>,
     k: usize,
 ) -> Result<EvalRun, DomainError> {
     let corpus = load_corpus();
@@ -243,6 +255,7 @@ pub async fn run_eval(
     let vectors = SqliteVectorIndex::new(db.clone());
 
     let mut fixture_of: HashMap<String, String> = HashMap::new();
+    let mut text_of: HashMap<String, String> = HashMap::new();
     for (idx, cn) in corpus.iter().enumerate() {
         const DUMMY_EPOCH_MS: i64 = 1000;
         let mut note = Note::new(cn.title.clone(), cn.body.clone(), DUMMY_EPOCH_MS);
@@ -256,6 +269,7 @@ pub async fn run_eval(
         let uuid = note.id.to_string();
         repo.upsert(&note).await?;
         let doc = format!("{}\n\n{}", cn.title, cn.body);
+        text_of.insert(cn.id.clone(), doc.clone());
         let emb = embedder.embed(std::slice::from_ref(&doc)).await?;
         let emb = emb.first().ok_or_else(|| {
             DomainError::Provider("embedder returned empty batch for single doc".to_string())
@@ -298,6 +312,16 @@ pub async fn run_eval(
             .await?,
             &fixture_of,
         );
+        let pool_ids = to_fixture(
+            &hybrid_candidates(&keyword, &vectors, embedder.as_ref(), &q.query, RERANK_POOL)
+                .await?,
+            &fixture_of,
+        );
+        let candidates: Vec<(String, String)> = pool_ids
+            .iter()
+            .filter_map(|fid| text_of.get(fid).map(|t| (fid.clone(), t.clone())))
+            .collect();
+        let rr = rerank(reranker.as_ref(), &q.query, &candidates, cov_k.max(k)).await?;
 
         per_query.push(QueryResult {
             query: q.query.clone(),
@@ -314,6 +338,10 @@ pub async fn run_eval(
             hybrid: MethodResult {
                 scores: score_one(&hy, &relevant, k, q),
                 ranked: truncate(&hy, k),
+            },
+            reranked: MethodResult {
+                scores: score_one(&rr, &relevant, k, q),
+                ranked: truncate(&rr, k),
             },
         });
     }
@@ -363,11 +391,13 @@ fn aggregate(per_query: &[QueryResult], unscored: &mut HashSet<String>, k: usize
             keyword: mean_scores(qrs.iter().map(|q| q.keyword.scores)),
             vector: mean_scores(qrs.iter().map(|q| q.vector.scores)),
             hybrid: mean_scores(qrs.iter().map(|q| q.hybrid.scores)),
+            reranked: mean_scores(qrs.iter().map(|q| q.reranked.scores)),
         });
     }
     let overall_keyword = mean_scores(per_query.iter().map(|q| q.keyword.scores));
     let overall_vector = mean_scores(per_query.iter().map(|q| q.vector.scores));
     let overall_hybrid = mean_scores(per_query.iter().map(|q| q.hybrid.scores));
+    let overall_reranked = mean_scores(per_query.iter().map(|q| q.reranked.scores));
     let mut unscored_categories: Vec<String> = unscored.drain().collect();
     unscored_categories.sort();
     Report {
@@ -375,6 +405,7 @@ fn aggregate(per_query: &[QueryResult], unscored: &mut HashSet<String>, k: usize
         overall_keyword,
         overall_vector,
         overall_hybrid,
+        overall_reranked,
         by_category,
         unscored_categories,
     }
@@ -414,14 +445,18 @@ fn to_fixture(
 mod tests {
     use super::*;
 
-    use raki_ai::FakeEmbeddingProvider;
+    use raki_ai::{FakeEmbeddingProvider, FakeReranker};
     use std::sync::Arc;
 
     #[tokio::test]
     async fn harness_scores_every_category_with_fake_embedder() {
-        let run = run_eval(Arc::new(FakeEmbeddingProvider::new(384)), 5)
-            .await
-            .unwrap();
+        let run = run_eval(
+            Arc::new(FakeEmbeddingProvider::new(384)),
+            Arc::new(FakeReranker),
+            5,
+        )
+        .await
+        .unwrap();
         let report = &run.report;
         assert_eq!(report.k, 5);
         assert!(!run.per_query.is_empty());
@@ -444,6 +479,23 @@ mod tests {
             assert!(c.hybrid.recall >= 0.0 && c.hybrid.recall <= 1.0);
         }
         assert!(report.overall_hybrid.recall >= 0.0 && report.overall_hybrid.recall <= 1.0);
+        // reranked is computed, in range, for every scored category, and carries nDCG on
+        // graded categories (the metric it is meant to move).
+        for c in &report.by_category {
+            assert!(c.reranked.recall >= 0.0 && c.reranked.recall <= 1.0);
+        }
+        assert!(report.overall_reranked.recall >= 0.0 && report.overall_reranked.recall <= 1.0);
+        for cat in ["dense-near-duplicate", "paraphrase-distractor"] {
+            let q = run
+                .per_query
+                .iter()
+                .find(|q| q.category == cat)
+                .unwrap_or_else(|| panic!("missing {cat}"));
+            assert!(
+                q.reranked.scores.ndcg.is_some(),
+                "{cat} reranked must carry nDCG (graded)"
+            );
+        }
         // Keyword must actually find the exact lexical-overlap matches (sanity that
         // the index is wired), independent of the fake embedder's meaningless vectors.
         let lex = report
@@ -615,7 +667,8 @@ mod tests {
             set: "dev".into(),
             keyword: mr.clone(),
             vector: mr.clone(),
-            hybrid: mr,
+            hybrid: mr.clone(),
+            reranked: mr,
         }
     }
 

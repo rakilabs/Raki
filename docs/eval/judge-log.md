@@ -35,3 +35,17 @@ D1 expectation (recall@3 < ~0.85 AND ≥3 categories < 1.0): **under-shot**.
 Per D1/D9: the note set is fixed; no notes were added to chase the number. If under-shot,
 this is the recorded finding (these modes did not break bge-small as hypothesized — Slice 4
 may have limited headroom on this set), not a failure of the slice.
+
+## 2026-06-06 — Slice 4 author-once reranker measurement (D-FALSIFY)
+
+Real model, k=3, corpus = 30 notes / 25 queries. Reranker: `jina-reranker-v1-turbo-en`
+over the hybrid recall union (pool 20). `reranked` is `hybrid + rerank`.
+
+reranked − hybrid nDCG@3 delta (graded categories):
+- lexical-cluster:        +0.016
+- dense-near-duplicate:   +0.000
+- paraphrase-distractor:  +0.000
+
+Recall@3 held vs hybrid: no — reranked non-coverage recall dropped from 0.98 (hybrid) to 0.95 (reranked), driven by `multi-relevant` (0.83 vs 1.00) and `buried-fact-in-long-note` (1.00 vs 1.00, no change) and `coverage` recall@10 (0.86 vs 1.00). The drops are from reordering: the cross-encoder promotes documents that score higher on query/doc overlap but are not the human-labeled relevant notes.
+
+Verdict (D-FALSIFY): The measured nDCG deltas are ~nil/positive-only-at-noise-level (+0.016 on lexical-cluster, 0.000 elsewhere). This is the recorded finding — the cross-encoder does not lift bge-small's *visible* ordering at this scale on this synthetic set, and recall-rescue (its real job) is unmeasurable here because hybrid recall@3 ≈ 1.0. No corpus tuning was done to produce a delta. The keep/kill decision is governed by D-DELETE (`docs/eval/reranker-deletion-criteria.md`), which is decided on REAL ground truth, not this set.

@@ -14,6 +14,31 @@ const HYBRID_CANDIDATE_POOL: usize = 20;
 /// while keyword still gives graceful degradation (cold start before embeddings finish)
 /// and exact-token / out-of-vocab coverage. A future cross-encoder rerank stage will
 /// reorder this candidate union for precision; see ADR-0006.
+/// The recall **union** — vector-primary, keyword-backfilled — UNtruncated. This is the
+/// candidate pool the precision stage (rerank) reorders. `pool` is the depth pulled from
+/// each retriever; the union is at least `HYBRID_CANDIDATE_POOL` deep so backfill ids exist.
+pub async fn hybrid_candidates(
+    keyword: &dyn KeywordIndex,
+    vectors: &dyn VectorIndex,
+    embedder: &dyn EmbeddingProvider,
+    query: &str,
+    pool: usize,
+) -> Result<Vec<String>, DomainError> {
+    let depth = pool.max(HYBRID_CANDIDATE_POOL);
+    let mut out = vector_search(vectors, embedder, query, depth).await?;
+    for id in search(keyword, query, depth).await? {
+        if !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    Ok(out)
+}
+
+/// Hybrid retrieval, **vector-primary**: `hybrid_candidates` truncated to `k`. The embedding
+/// model is the stronger retriever on clean text, so vector's ranking is authoritative and
+/// keyword only *backfills* ids vector did not return — provably never worse than vector
+/// alone, while keyword gives cold-start and exact-token coverage. The cross-encoder rerank
+/// stage (eval, ADR-0006) reorders `hybrid_candidates` for precision.
 pub async fn hybrid_search(
     keyword: &dyn KeywordIndex,
     vectors: &dyn VectorIndex,
@@ -21,13 +46,7 @@ pub async fn hybrid_search(
     query: &str,
     k: usize,
 ) -> Result<Vec<String>, DomainError> {
-    let pool = k.max(HYBRID_CANDIDATE_POOL);
-    let mut out = vector_search(vectors, embedder, query, pool).await?;
-    for id in search(keyword, query, pool).await? {
-        if !out.contains(&id) {
-            out.push(id);
-        }
-    }
+    let mut out = hybrid_candidates(keyword, vectors, embedder, query, k).await?;
     out.truncate(k);
     Ok(out)
 }
@@ -130,6 +149,41 @@ mod tests {
         let vectors = FakeVectors(vec!["x", "y"]);
         let ids = vector_search(&vectors, &FakeEmbed, "q", 10).await.unwrap();
         assert_eq!(ids, vec!["x".to_string(), "y".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_output_is_characterized() {
+        // Vector is authoritative [c, b, e]; keyword [a, b, c, d] backfills only the
+        // ids vector missed (a, d), in keyword order, after the vector block.
+        let keyword = FakeKeyword(vec!["a", "b", "c", "d"]);
+        let vectors = FakeVectors(vec!["c", "b", "e"]);
+        let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, "q", 4)
+            .await
+            .unwrap();
+        assert_eq!(
+            ids,
+            vec![
+                "c".to_string(),
+                "b".to_string(),
+                "e".to_string(),
+                "a".to_string()
+            ],
+            "vector order preserved; keyword-only ids backfill in order; truncated to k=4"
+        );
+    }
+
+    #[tokio::test]
+    async fn hybrid_candidates_returns_the_untruncated_union() {
+        let keyword = FakeKeyword(vec!["a", "b"]);
+        let vectors = FakeVectors(vec!["b", "c"]);
+        let ids = hybrid_candidates(&keyword, &vectors, &FakeEmbed, "q", 20)
+            .await
+            .unwrap();
+        assert_eq!(
+            ids,
+            vec!["b".to_string(), "c".to_string(), "a".to_string()],
+            "full union, vector-first, keyword backfill, no truncation"
+        );
     }
 
     #[tokio::test]

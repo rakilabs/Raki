@@ -43,6 +43,20 @@
         "ndcg": null,
         "recall_cov": null
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n1",
+        "n28",
+        "n15"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
     }
   },
   {
@@ -81,6 +95,20 @@
       "ranked": [
         "n3",
         "n20",
+        "n10"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
+    },
+    "reranked": {
+      "ranked": [
+        "n3",
+        "n30",
         "n10"
       ],
       "scores": {
@@ -137,6 +165,20 @@
         "ndcg": null,
         "recall_cov": null
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n7",
+        "n23",
+        "n25"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
     }
   },
   {
@@ -184,6 +226,20 @@
         "ndcg": null,
         "recall_cov": null
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n5",
+        "n30",
+        "n28"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
     }
   },
   {
@@ -222,6 +278,20 @@
       "ranked": [
         "n6",
         "n12",
+        "n3"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
+    },
+    "reranked": {
+      "ranked": [
+        "n6",
+        "n11",
         "n3"
       ],
       "scores": {
@@ -278,6 +348,20 @@
         "ndcg": null,
         "recall_cov": null
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n11",
+        "n6",
+        "n1"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 0.5,
+        "mrr": 0.5,
+        "ndcg": null,
+        "recall_cov": null
+      }
     }
   },
   {
@@ -325,6 +409,20 @@
         "ndcg": null,
         "recall_cov": null
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n4",
+        "n11",
+        "n3"
+      ],
+      "scores": {
+        "recall": 0.5,
+        "map": 0.5,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
     }
   },
   {
@@ -364,6 +462,20 @@
         "n12",
         "n6",
         "n13"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
+    },
+    "reranked": {
+      "ranked": [
+        "n12",
+        "n6",
+        "n16"
       ],
       "scores": {
         "recall": 1.0,
@@ -419,6 +531,20 @@
         "ndcg": null,
         "recall_cov": null
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n10",
+        "n3",
+        "n30"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
     }
   },
   {
@@ -456,6 +582,20 @@
         "n4",
         "n19",
         "n24"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
+    },
+    "reranked": {
+      "ranked": [
+        "n4",
+        "n11",
+        "n18"
       ],
       "scores": {
         "recall": 1.0,
@@ -511,6 +651,20 @@
         "ndcg": null,
         "recall_cov": null
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n2",
+        "n17",
+        "n3"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
     }
   },
   {
@@ -557,6 +711,20 @@
         "ndcg": null,
         "recall_cov": null
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n8",
+        "n10",
+        "n3"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
     }
   },
   {
@@ -594,6 +762,20 @@
         "n9",
         "n20",
         "n18"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
+    },
+    "reranked": {
+      "ranked": [
+        "n9",
+        "n22",
+        "n21"
       ],
       "scores": {
         "recall": 1.0,
@@ -649,6 +831,20 @@
         "ndcg": null,
         "recall_cov": null
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n11",
+        "n30",
+        "n16"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
     }
   },
   {
@@ -686,6 +882,20 @@
         "n13",
         "n20",
         "n19"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
+    },
+    "reranked": {
+      "ranked": [
+        "n13",
+        "n25",
+        "n7"
       ],
       "scores": {
         "recall": 1.0,
@@ -739,6 +949,20 @@
         "ndcg": 0.8472668887613066,
         "recall_cov": null
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n21",
+        "n9",
+        "n22"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0,
+        "recall_cov": null
+      }
     }
   },
   {
@@ -782,6 +1006,20 @@
         "map": 1.0,
         "mrr": 1.0,
         "ndcg": 1.0,
+        "recall_cov": null
+      }
+    },
+    "reranked": {
+      "ranked": [
+        "n20",
+        "n19",
+        "n18"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 0.878961873034099,
         "recall_cov": null
       }
     }
@@ -831,6 +1069,20 @@
         "ndcg": null,
         "recall_cov": 1.0
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n3",
+        "n10",
+        "n30"
+      ],
+      "scores": {
+        "recall": 0.2857142857142857,
+        "map": 0.2857142857142857,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": 0.8571428571428571
+      }
     }
   },
   {
@@ -866,6 +1118,20 @@
       }
     },
     "hybrid": {
+      "ranked": [
+        "n23",
+        "n7",
+        "n27"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0,
+        "recall_cov": null
+      }
+    },
+    "reranked": {
       "ranked": [
         "n23",
         "n7",
@@ -925,6 +1191,20 @@
         "ndcg": 1.0,
         "recall_cov": null
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n24",
+        "n27",
+        "n7"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0,
+        "recall_cov": null
+      }
     }
   },
   {
@@ -972,6 +1252,20 @@
         "ndcg": 0.8262346571285599,
         "recall_cov": null
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n28",
+        "n24",
+        "n29"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 0.8262346571285599,
+        "recall_cov": null
+      }
     }
   },
   {
@@ -1007,6 +1301,20 @@
       }
     },
     "hybrid": {
+      "ranked": [
+        "n28",
+        "n1",
+        "n7"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0,
+        "recall_cov": null
+      }
+    },
+    "reranked": {
       "ranked": [
         "n28",
         "n1",
@@ -1066,6 +1374,20 @@
         "ndcg": null,
         "recall_cov": null
       }
+    },
+    "reranked": {
+      "ranked": [
+        "n30",
+        "n3",
+        "n10"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
     }
   },
   {
@@ -1101,6 +1423,20 @@
       }
     },
     "hybrid": {
+      "ranked": [
+        "n30",
+        "n5",
+        "n10"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
+    },
+    "reranked": {
       "ranked": [
         "n30",
         "n5",
