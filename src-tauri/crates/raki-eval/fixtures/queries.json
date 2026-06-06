@@ -20,5 +20,15 @@
     "grades": { "n20": 3, "n9": 1, "n19": 1, "n21": 1, "n22": 1 } },
   { "query": "all my rust programming notes", "category": "coverage", "set": "dev",
     "relevant_ids": ["n3", "n10", "n9", "n19", "n20", "n21", "n22"] },
+  { "query": "my espresso tastes bitter and harsh", "category": "dense-near-duplicate", "set": "dev", "relevant_ids": ["n23"],
+    "grades": { "n23": 3, "n7": 1, "n24": 1, "n25": 1, "n26": 1, "n27": 1 } },
+  { "query": "water is jetting through my espresso puck unevenly", "category": "dense-near-duplicate", "set": "holdout", "relevant_ids": ["n24"],
+    "grades": { "n24": 3, "n7": 1, "n23": 1, "n25": 1, "n26": 1, "n27": 1 } },
+  { "query": "why is my bread dense and didn't rise", "category": "paraphrase-distractor", "set": "dev", "relevant_ids": ["n28"],
+    "grades": { "n28": 3, "n1": 1 } },
+  { "query": "my sourdough came out flat and gummy", "category": "paraphrase-distractor", "set": "holdout", "relevant_ids": ["n28"],
+    "grades": { "n28": 3, "n1": 1 } },
+  { "query": "how do I get rid of rust", "category": "polysemy", "set": "dev", "relevant_ids": ["n30"] },
+  { "query": "cleaning rust off garden tools", "category": "polysemy", "set": "holdout", "relevant_ids": ["n30"] },
   { "query": "how do I change a flat car tire", "category": "negative", "set": "dev", "relevant_ids": [] }
 ]

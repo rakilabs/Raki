@@ -5,7 +5,8 @@
     "set": "dev",
     "keyword": {
       "ranked": [
-        "n1"
+        "n1",
+        "n28"
       ],
       "scores": {
         "recall": 1.0,
@@ -18,8 +19,8 @@
     "vector": {
       "ranked": [
         "n1",
-        "n7",
-        "n15"
+        "n28",
+        "n29"
       ],
       "scores": {
         "recall": 1.0,
@@ -32,8 +33,8 @@
     "hybrid": {
       "ranked": [
         "n1",
-        "n7",
-        "n15"
+        "n28",
+        "n29"
       ],
       "scores": {
         "recall": 1.0,
@@ -52,7 +53,7 @@
       "ranked": [
         "n3",
         "n20",
-        "n10"
+        "n30"
       ],
       "scores": {
         "recall": 1.0,
@@ -97,42 +98,42 @@
     "set": "dev",
     "keyword": {
       "ranked": [
+        "n23",
         "n7",
-        "n20",
-        "n19"
+        "n25"
       ],
       "scores": {
         "recall": 1.0,
-        "map": 1.0,
-        "mrr": 1.0,
+        "map": 0.5,
+        "mrr": 0.5,
         "ndcg": null,
         "recall_cov": null
       }
     },
     "vector": {
       "ranked": [
+        "n23",
         "n7",
-        "n1",
-        "n11"
+        "n27"
       ],
       "scores": {
         "recall": 1.0,
-        "map": 1.0,
-        "mrr": 1.0,
+        "map": 0.5,
+        "mrr": 0.5,
         "ndcg": null,
         "recall_cov": null
       }
     },
     "hybrid": {
       "ranked": [
+        "n23",
         "n7",
-        "n1",
-        "n11"
+        "n27"
       ],
       "scores": {
         "recall": 1.0,
-        "map": 1.0,
-        "mrr": 1.0,
+        "map": 0.5,
+        "mrr": 0.5,
         "ndcg": null,
         "recall_cov": null
       }
@@ -160,7 +161,7 @@
       "ranked": [
         "n5",
         "n15",
-        "n3"
+        "n30"
       ],
       "scores": {
         "recall": 1.0,
@@ -174,7 +175,7 @@
       "ranked": [
         "n5",
         "n15",
-        "n3"
+        "n30"
       ],
       "scores": {
         "recall": 1.0,
@@ -192,8 +193,8 @@
     "keyword": {
       "ranked": [
         "n6",
-        "n22",
-        "n21"
+        "n21",
+        "n19"
       ],
       "scores": {
         "recall": 1.0,
@@ -379,14 +380,14 @@
     "set": "holdout",
     "keyword": {
       "ranked": [
+        "n30",
         "n3",
-        "n10",
-        "n16"
+        "n10"
       ],
       "scores": {
         "recall": 1.0,
-        "map": 1.0,
-        "mrr": 1.0,
+        "map": 0.5833333333333333,
+        "mrr": 0.5,
         "ndcg": null,
         "recall_cov": null
       }
@@ -440,7 +441,7 @@
       "ranked": [
         "n4",
         "n19",
-        "n11"
+        "n24"
       ],
       "scores": {
         "recall": 1.0,
@@ -454,7 +455,7 @@
       "ranked": [
         "n4",
         "n19",
-        "n11"
+        "n24"
       ],
       "scores": {
         "recall": 1.0,
@@ -472,8 +473,8 @@
     "keyword": {
       "ranked": [
         "n2",
-        "n1",
-        "n10"
+        "n10",
+        "n24"
       ],
       "scores": {
         "recall": 1.0,
@@ -487,7 +488,7 @@
       "ranked": [
         "n2",
         "n17",
-        "n1"
+        "n28"
       ],
       "scores": {
         "recall": 1.0,
@@ -501,7 +502,7 @@
       "ranked": [
         "n2",
         "n17",
-        "n1"
+        "n28"
       ],
       "scores": {
         "recall": 1.0,
@@ -611,7 +612,7 @@
       "ranked": [
         "n11",
         "n12",
-        "n20"
+        "n29"
       ],
       "scores": {
         "recall": 1.0,
@@ -624,8 +625,8 @@
     "vector": {
       "ranked": [
         "n11",
-        "n16",
-        "n17"
+        "n24",
+        "n16"
       ],
       "scores": {
         "recall": 1.0,
@@ -638,8 +639,8 @@
     "hybrid": {
       "ranked": [
         "n11",
-        "n16",
-        "n17"
+        "n24",
+        "n16"
       ],
       "scores": {
         "recall": 1.0,
@@ -792,12 +793,12 @@
     "keyword": {
       "ranked": [
         "n3",
-        "n17",
-        "n10"
+        "n30",
+        "n17"
       ],
       "scores": {
-        "recall": 0.2857142857142857,
-        "map": 0.23809523809523808,
+        "recall": 0.14285714285714285,
+        "map": 0.14285714285714285,
         "mrr": 1.0,
         "ndcg": null,
         "recall_cov": 0.2857142857142857
@@ -829,6 +830,288 @@
         "mrr": 1.0,
         "ndcg": null,
         "recall_cov": 1.0
+      }
+    }
+  },
+  {
+    "query": "my espresso tastes bitter and harsh",
+    "category": "dense-near-duplicate",
+    "set": "dev",
+    "keyword": {
+      "ranked": [
+        "n23",
+        "n27",
+        "n7"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0,
+        "recall_cov": null
+      }
+    },
+    "vector": {
+      "ranked": [
+        "n23",
+        "n7",
+        "n27"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0,
+        "recall_cov": null
+      }
+    },
+    "hybrid": {
+      "ranked": [
+        "n23",
+        "n7",
+        "n27"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0,
+        "recall_cov": null
+      }
+    }
+  },
+  {
+    "query": "water is jetting through my espresso puck unevenly",
+    "category": "dense-near-duplicate",
+    "set": "holdout",
+    "keyword": {
+      "ranked": [
+        "n24",
+        "n27",
+        "n1"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 0.878961873034099,
+        "recall_cov": null
+      }
+    },
+    "vector": {
+      "ranked": [
+        "n24",
+        "n27",
+        "n7"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0,
+        "recall_cov": null
+      }
+    },
+    "hybrid": {
+      "ranked": [
+        "n24",
+        "n27",
+        "n7"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0,
+        "recall_cov": null
+      }
+    }
+  },
+  {
+    "query": "why is my bread dense and didn't rise",
+    "category": "paraphrase-distractor",
+    "set": "dev",
+    "keyword": {
+      "ranked": [
+        "n28",
+        "n24",
+        "n29"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 0.8262346571285599,
+        "recall_cov": null
+      }
+    },
+    "vector": {
+      "ranked": [
+        "n28",
+        "n19",
+        "n7"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 0.8262346571285599,
+        "recall_cov": null
+      }
+    },
+    "hybrid": {
+      "ranked": [
+        "n28",
+        "n19",
+        "n7"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 0.8262346571285599,
+        "recall_cov": null
+      }
+    }
+  },
+  {
+    "query": "my sourdough came out flat and gummy",
+    "category": "paraphrase-distractor",
+    "set": "holdout",
+    "keyword": {
+      "ranked": [
+        "n1",
+        "n28",
+        "n29"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 0.5,
+        "mrr": 0.5,
+        "ndcg": 0.7967075809905066,
+        "recall_cov": null
+      }
+    },
+    "vector": {
+      "ranked": [
+        "n28",
+        "n1",
+        "n7"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0,
+        "recall_cov": null
+      }
+    },
+    "hybrid": {
+      "ranked": [
+        "n28",
+        "n1",
+        "n7"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0,
+        "recall_cov": null
+      }
+    }
+  },
+  {
+    "query": "how do I get rid of rust",
+    "category": "polysemy",
+    "set": "dev",
+    "keyword": {
+      "ranked": [
+        "n30",
+        "n3",
+        "n21"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
+    },
+    "vector": {
+      "ranked": [
+        "n30",
+        "n10",
+        "n3"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
+    },
+    "hybrid": {
+      "ranked": [
+        "n30",
+        "n10",
+        "n3"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
+    }
+  },
+  {
+    "query": "cleaning rust off garden tools",
+    "category": "polysemy",
+    "set": "holdout",
+    "keyword": {
+      "ranked": [
+        "n30",
+        "n5",
+        "n3"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
+    },
+    "vector": {
+      "ranked": [
+        "n30",
+        "n5",
+        "n10"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
+      }
+    },
+    "hybrid": {
+      "ranked": [
+        "n30",
+        "n5",
+        "n10"
+      ],
+      "scores": {
+        "recall": 1.0,
+        "map": 1.0,
+        "mrr": 1.0,
+        "ndcg": null,
+        "recall_cov": null
       }
     }
   }

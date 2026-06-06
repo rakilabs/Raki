@@ -42,5 +42,21 @@
   { "id": "n21", "title": "Build error E0599 method not found",
     "body": "Cargo reported error E0599: no method by that name was found for the type. The trait providing it was out of scope, so I added a use for the trait, then it compiled." },
   { "id": "n22", "title": "Build error E0412 cannot find type",
-    "body": "Cargo reported error E0412: cannot find the type in this scope. It lived in another module, so I imported it with a use path, then it compiled." }
+    "body": "Cargo reported error E0412: cannot find the type in this scope. It lived in another module, so I imported it with a use path, then it compiled." },
+  { "id": "n23", "title": "Bitter espresso fix",
+    "body": "If the shot tastes bitter and harsh, the coffee is over-extracted: the grind is too fine or the shot ran too long. Grind a little coarser and pull a shorter shot, aiming for about twenty-five seconds." },
+  { "id": "n24", "title": "Espresso channeling",
+    "body": "Channeling is when water jets through a crack in the puck, leaving a dense, unevenly packed bed and under-extracted coffee. Distribute the grounds evenly and tamp level to prevent it." },
+  { "id": "n25", "title": "Espresso grind size",
+    "body": "Grind size is the biggest lever on extraction. A finer grind slows the flow and raises extraction; a coarser grind speeds it up. Change it in small steps and taste between adjustments." },
+  { "id": "n26", "title": "Espresso dose and ratio",
+    "body": "A double shot is about eighteen grams of coffee in and thirty-six grams of liquid out, a 1:2 ratio. Weigh both the dose and the output so shots stay repeatable." },
+  { "id": "n27", "title": "Espresso water temperature",
+    "body": "Brew temperature near ninety-three degrees Celsius suits medium roasts. Hotter water extracts more and can push a shot toward bitter; cooler water can leave it sour and weak." },
+  { "id": "n28", "title": "Sourdough proofing and rise",
+    "body": "If the loaf bakes up dense and barely rises, the dough was under-proofed or the starter was weak. Let it ferment longer until it grows by about half and springs back slowly from a poke." },
+  { "id": "n29", "title": "Banana bread recipe",
+    "body": "Mash three ripe bananas, stir in flour, sugar, an egg, melted butter, and baking soda, then bake at one hundred seventy-five degrees for an hour until a skewer comes out clean." },
+  { "id": "n30", "title": "Removing rust from tools",
+    "body": "To get rust off garden tools or a bike chain, soak the metal in white vinegar overnight, scrub it with steel wool, then dry it and wipe on a little oil to stop the corrosion coming back." }
 ]
