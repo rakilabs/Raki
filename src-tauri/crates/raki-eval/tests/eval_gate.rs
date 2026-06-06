@@ -1,45 +1,117 @@
-//! The retrieval regression gate. `#[ignore]`d because it runs the real model
-//! (network + native runtime), like the fastembed smoke test. Run explicitly:
-//!   cargo test -p raki-eval --test eval_gate -- --ignored
-//! and in a dedicated CI job with a warm model cache (keyed on the model id).
+//! The retrieval regression gate. Two layers (spec D5 + D8):
+//!  - `keyword_snapshot_is_deterministic` runs the fake embedder and checks the KEYWORD
+//!    per-query snapshot. Keyword retrieval is real FTS5 and model-independent, so this is
+//!    exact and runs in ordinary `cargo test` (and as the required CI job).
+//!  - `real_model_gate` (#[ignore]) runs the real bge model and checks the vector/hybrid
+//!    per-query snapshots plus per-method average floors. Run explicitly:
+//!    cargo test -p raki-eval --test eval_gate -- --ignored
 //!
-//! Floors are calibrated from the first `eval-report` run and set conservatively
-//! below the observed values. They are a regression tripwire, not a quality verdict:
-//! a tuning change that drops below them goes red. Ratchet them UP as the corpus and
-//! retrieval improve — never silently down.
+//! The snapshots (D5) are the teeth; the floors (D8) are a coarse smoke alarm. Coverage is
+//! floored on recall@10 (its proper metric), never averaged into the recall@3 floor.
 
 use std::sync::Arc;
 
-use raki_ai::FastEmbedProvider;
-use raki_eval::run_eval;
+use raki_ai::{FakeEmbeddingProvider, FastEmbedProvider};
+use raki_eval::{load_snapshot, run_eval, snapshot_regressions, Method, MethodScores, QueryResult};
 
-// Calibrated 2026-06-05 at k=3 on the 22-note corpus / 19 queries. Floors are ~0.10
-// below observed OVERALL hybrid (R0.97/M0.97, which already averages in the coverage
-// query whose recall@3 is capped at 3/|relevant| by design). Ratchet UP as the corpus
-// and retrieval improve — never silently down. 3a-ii replaces this single overall floor
-// with per-method floors (D8) so coverage recall stops diluting the precision floor.
-const RECALL_FLOOR: f64 = 0.90;
-const MAP_FLOOR: f64 = 0.90;
+// Per-method recall@3 / MAP@3 floors over NON-COVERAGE scored queries, calibrated
+// 2026-06-05 ~0.10 below observed (kw ~0.85, vec/hyb ~1.00 non-coverage). Ratchet UP only.
+const KW_RECALL_FLOOR: f64 = 0.75;
+const KW_MAP_FLOOR: f64 = 0.75;
+const VEC_RECALL_FLOOR: f64 = 0.90;
+const VEC_MAP_FLOOR: f64 = 0.90;
+const HYB_RECALL_FLOOR: f64 = 0.90;
+const HYB_MAP_FLOOR: f64 = 0.90;
+// Coverage recall@10 floor (vec/hyb observed 1.00). nDCG@3 floor for ordering (observed 0.92 vec/hyb).
+const COVERAGE_RECALL10_FLOOR: f64 = 0.85;
+const ORDERING_NDCG_FLOOR: f64 = 0.80;
+
+fn mean(it: impl Iterator<Item = f64>) -> f64 {
+    let (sum, n) = it.fold((0.0, 0usize), |(s, n), v| (s + v, n + 1));
+    if n == 0 {
+        0.0
+    } else {
+        sum / n as f64
+    }
+}
+
+fn noncov_mean(per_query: &[QueryResult], m: Method, f: fn(&MethodScores) -> f64) -> f64 {
+    mean(
+        per_query
+            .iter()
+            .filter(|q| q.category != "coverage")
+            .map(|q| f(&q.method(m).scores)),
+    )
+}
+
+#[tokio::test]
+async fn keyword_snapshot_is_deterministic() -> Result<(), Box<dyn std::error::Error>> {
+    let run = run_eval(Arc::new(FakeEmbeddingProvider::new(384)), 3).await?;
+    let baseline = load_snapshot()?;
+    let regressions = snapshot_regressions(&run.per_query, &baseline, &[Method::Keyword]);
+    assert!(
+        regressions.is_empty(),
+        "keyword regressions:\n{}",
+        regressions.join("\n")
+    );
+    Ok(())
+}
 
 #[tokio::test]
 #[ignore = "runs the real bge model (network + native runtime); run with --ignored"]
-async fn retrieval_meets_quality_floor() -> Result<(), Box<dyn std::error::Error>> {
-    let embedder = Arc::new(FastEmbedProvider::try_new()?);
-    let run = run_eval(embedder, 3).await?;
-    let report = &run.report;
+async fn real_model_gate() -> Result<(), Box<dyn std::error::Error>> {
+    let run = run_eval(Arc::new(FastEmbedProvider::try_new()?), 3).await?;
+    let baseline = load_snapshot()?;
 
-    // Floor the PRODUCTION method (hybrid — what search_notes uses). Both recall and
-    // MAP are gated so ranking can't rot while recall holds.
-    let recall = report.overall_hybrid.recall;
-    let map = report.overall_hybrid.map;
+    // D5: no vector/hybrid query regresses (keyword already covered deterministically).
+    let regressions =
+        snapshot_regressions(&run.per_query, &baseline, &[Method::Vector, Method::Hybrid]);
+    assert!(
+        regressions.is_empty(),
+        "vec/hyb regressions:\n{}",
+        regressions.join("\n")
+    );
 
-    assert!(
-        recall >= RECALL_FLOOR,
-        "hybrid recall {recall:.3} below floor {RECALL_FLOOR}"
-    );
-    assert!(
-        map >= MAP_FLOOR,
-        "hybrid MAP {map:.3} below floor {MAP_FLOOR}"
-    );
+    // D8: per-method floors over non-coverage queries.
+    let pq = &run.per_query;
+    for (m, rf, mf) in [
+        (Method::Keyword, KW_RECALL_FLOOR, KW_MAP_FLOOR),
+        (Method::Vector, VEC_RECALL_FLOOR, VEC_MAP_FLOOR),
+        (Method::Hybrid, HYB_RECALL_FLOOR, HYB_MAP_FLOOR),
+    ] {
+        let r = noncov_mean(pq, m, |s| s.recall);
+        let mp = noncov_mean(pq, m, |s| s.map);
+        assert!(r >= rf, "{m:?} non-coverage recall {r:.3} below floor {rf}");
+        assert!(mp >= mf, "{m:?} non-coverage MAP {mp:.3} below floor {mf}");
+    }
+
+    // D8: coverage floored on recall@10 (vec + hyb — the production-facing methods).
+    let cov = pq
+        .iter()
+        .find(|q| q.category == "coverage")
+        .expect("a coverage query");
+    for m in [Method::Vector, Method::Hybrid] {
+        let c = cov
+            .method(m)
+            .scores
+            .recall_cov
+            .expect("coverage recall@10 present");
+        assert!(
+            c >= COVERAGE_RECALL10_FLOOR,
+            "{m:?} coverage recall@10 {c:.3} below floor {COVERAGE_RECALL10_FLOOR}"
+        );
+    }
+
+    // D8: ordering categories floored on nDCG@3 (vec + hyb).
+    for q in pq.iter().filter(|q| q.category == "lexical-cluster") {
+        for m in [Method::Vector, Method::Hybrid] {
+            let n = q.method(m).scores.ndcg.expect("ordering nDCG present");
+            assert!(
+                n >= ORDERING_NDCG_FLOOR,
+                "{:?} {m:?} nDCG {n:.3} below floor {ORDERING_NDCG_FLOOR}",
+                q.query
+            );
+        }
+    }
     Ok(())
 }
