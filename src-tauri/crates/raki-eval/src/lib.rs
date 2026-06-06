@@ -45,7 +45,7 @@ pub fn load_queries() -> Vec<EvalQuery> {
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use raki_domain::{DomainError, EmbeddingProvider, Note, NoteRepository, VectorIndex};
+use raki_domain::{DomainError, EmbeddingProvider, Note, NoteId, NoteRepository, VectorIndex};
 use raki_retrieval::{
     average_precision_at_k, hybrid_search, ndcg_at_k, recall_at_k, reciprocal_rank, search,
     vector_search,
@@ -243,9 +243,16 @@ pub async fn run_eval(
     let vectors = SqliteVectorIndex::new(db.clone());
 
     let mut fixture_of: HashMap<String, String> = HashMap::new();
-    for cn in &corpus {
+    for (idx, cn) in corpus.iter().enumerate() {
         const DUMMY_EPOCH_MS: i64 = 1000;
-        let note = Note::new(cn.title.clone(), cn.body.clone(), DUMMY_EPOCH_MS);
+        let mut note = Note::new(cn.title.clone(), cn.body.clone(), DUMMY_EPOCH_MS);
+        // Deterministic note id derived from the corpus position, so the keyword
+        // tie-break (`ORDER BY score, note_id`, 3a-i) is stable across runs and machines.
+        // `Note::new` would mint a random UUIDv7, which makes the snapshot's tie ordering
+        // non-reproducible — vacuous determinism that 3b's near-duplicate clusters (where
+        // bm25 ties are likely) would expose as flaky CI. A stable id makes the guarantee real.
+        note.id = NoteId::parse(&format!("00000000-0000-7000-8000-{:012x}", idx + 1))
+            .expect("synthetic fixture uuid is well-formed");
         let uuid = note.id.to_string();
         repo.upsert(&note).await?;
         let doc = format!("{}\n\n{}", cn.title, cn.body);
