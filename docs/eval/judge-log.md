@@ -39,13 +39,43 @@ may have limited headroom on this set), not a failure of the slice.
 ## 2026-06-06 — Slice 4 author-once reranker measurement (D-FALSIFY)
 
 Real model, k=3, corpus = 30 notes / 25 queries. Reranker: `jina-reranker-v1-turbo-en`
-over the hybrid recall union (pool 20). `reranked` is `hybrid + rerank`.
+over the hybrid recall union (pool 20). `reranked` is `hybrid + rerank`. Measured once; no
+tuning. (Corrected 2026-06-06: the first version of this entry mislabeled the
+coverage-included OVERALL recall as "non-coverage recall"; the table below uses the gate's
+actual `noncov_mean` basis and the per-category report.)
 
-reranked − hybrid nDCG@3 delta (graded categories):
-- lexical-cluster:        +0.016
-- dense-near-duplicate:   +0.000
-- paraphrase-distractor:  +0.000
+reranked − hybrid nDCG@3 delta (graded categories — the only metric with visible headroom):
+- lexical-cluster:        +0.016   (0.92 → 0.94; one category, 2 queries — noise-level)
+- dense-near-duplicate:   +0.000   (1.00 → 1.00; saturated)
+- paraphrase-distractor:  +0.000   (0.91 → 0.91)
 
-Recall@3 held vs hybrid: no — reranked non-coverage recall dropped from 0.98 (hybrid) to 0.95 (reranked), driven by `multi-relevant` (0.83 vs 1.00) and `buried-fact-in-long-note` (1.00 vs 1.00, no change) and `coverage` recall@10 (0.86 vs 1.00). The drops are from reordering: the cross-encoder promotes documents that score higher on query/doc overlap but are not the human-labeled relevant notes.
+reranked vs hybrid, all metrics:
 
-Verdict (D-FALSIFY): The measured nDCG deltas are ~nil/positive-only-at-noise-level (+0.016 on lexical-cluster, 0.000 elsewhere). This is the recorded finding — the cross-encoder does not lift bge-small's *visible* ordering at this scale on this synthetic set, and recall-rescue (its real job) is unmeasurable here because hybrid recall@3 ≈ 1.0. No corpus tuning was done to produce a delta. The keep/kill decision is governed by D-DELETE (`docs/eval/reranker-deletion-criteria.md`), which is decided on REAL ground truth, not this set.
+| metric                          | hybrid | reranked |   Δ    |
+|---------------------------------|--------|----------|--------|
+| non-coverage recall@3           | 1.00   | 0.98     | −0.02  |
+| non-coverage MAP@3              | 0.98   | 0.96     | −0.02  |
+| coverage recall@10              | 1.00   | 0.86     | −0.14  |
+| OVERALL recall@3 (incl coverage)| 0.98   | 0.95     | −0.03  |
+| OVERALL nDCG@3                  | 0.95   | 0.95     |  0.00  |
+
+Reranking is **net-negative on this corpus.** It degrades, not just fails to help:
+- `multi-relevant` recall@3: 1.00 → 0.83 (a relevant note reordered out of the top-3),
+- `coverage` recall@10: 1.00 → 0.86 (relevant rust notes pushed past rank 10),
+- `buried-fact-in-long-note` MAP@3: 1.00 → 0.75 (the correct answer demoted to rank 2).
+It helped exactly one place — `semantic-paraphrase` MAP 0.83 → 1.00 — and moved
+`lexical-cluster` nDCG by +0.016. Net: small recall/MAP loss, no real ordering gain.
+
+Why this is structural, not a bug: on a corpus where hybrid recall@3 ≈ 1.0, the relevant
+note is already in the top-3, so reordering the pool and re-truncating to 3 can only hold or
+*lose* recall — never raise it. `reranked recall ≤ hybrid recall` is guaranteed here. The
+cross-encoder's real job (recall-rescue — pulling a relevant note up from deep in the pool)
+is **unmeasurable** because there is nothing deep to rescue.
+
+Verdict (D-FALSIFY): the measured result is **no ordering gain and a small recall/MAP loss** —
+not the hoped-for lift, and honestly recorded as such rather than spun as "nil." This does not
+fail the slice: per the spec, a nil/negative *synthetic* delta is an expected outcome, and it
+**pre-loads** the D-DELETE case rather than the reranker earning its keep. No corpus tuning was
+done. The keep/kill decision is governed by D-DELETE
+(`docs/eval/reranker-deletion-criteria.md`), decided on REAL ground truth (≥ ~100 labeled
+queries), not this saturated set.
