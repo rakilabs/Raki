@@ -474,6 +474,17 @@ mod tests {
             lex.keyword.ndcg.is_some(),
             "lexical-cluster aggregate carries nDCG"
         );
+        for cat in ["dense-near-duplicate", "paraphrase-distractor"] {
+            let q = run
+                .per_query
+                .iter()
+                .find(|q| q.category == cat)
+                .unwrap_or_else(|| panic!("missing {cat}"));
+            assert!(
+                q.keyword.scores.ndcg.is_some(),
+                "{cat} must produce nDCG (graded)"
+            );
+        }
         let cov = run
             .per_query
             .iter()
@@ -489,7 +500,7 @@ mod tests {
     fn fixtures_parse_and_reference_real_corpus_ids() {
         let corpus = load_corpus();
         let queries = load_queries();
-        assert!(corpus.len() >= 20, "need a non-trivial corpus");
+        assert!(corpus.len() >= 28, "need a non-trivial corpus");
         assert!(queries.len() >= 8, "need queries across the taxonomy");
 
         let ids: std::collections::HashSet<&str> = corpus.iter().map(|n| n.id.as_str()).collect();
@@ -542,6 +553,17 @@ mod tests {
             "need a holdout set"
         );
         assert!(queries.iter().any(|q| q.set == "dev"), "need a dev set");
+    }
+
+    #[test]
+    fn new_failure_mode_categories_present() {
+        let queries = load_queries();
+        for c in ["dense-near-duplicate", "paraphrase-distractor", "polysemy"] {
+            assert!(
+                queries.iter().any(|q| q.category == c),
+                "missing mandatory 3b category {c}"
+            );
+        }
     }
 
     #[test]
