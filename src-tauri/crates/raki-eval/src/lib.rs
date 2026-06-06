@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 pub struct CorpusNote {
@@ -53,7 +53,7 @@ use raki_retrieval::{
 use raki_storage::{Database, SqliteKeywordIndex, SqliteNoteRepository, SqliteVectorIndex};
 
 /// Mean metrics for one retrieval method over a set of (scored) queries.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct MethodScores {
     pub recall: f64,
     pub map: f64,
@@ -87,7 +87,7 @@ pub struct Report {
 }
 
 /// One method's outcome for one query: the ranked fixture ids (top-k) and the metrics.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MethodResult {
     pub ranked: Vec<String>, // fixture ids, best-first, truncated to k
     pub scores: MethodScores,
@@ -95,7 +95,7 @@ pub struct MethodResult {
 
 /// Per-query detail for every method — the substrate for the audit (3a-i) and the
 /// per-query snapshot gate (3a-ii).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryResult {
     pub query: String,
     pub category: String,
@@ -103,6 +103,119 @@ pub struct QueryResult {
     pub keyword: MethodResult,
     pub vector: MethodResult,
     pub hybrid: MethodResult,
+}
+
+/// Which retrieval method a snapshot check targets. The deterministic gate checks
+/// `Keyword` only (model-independent); the real-model gate checks all three.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Method {
+    Keyword,
+    Vector,
+    Hybrid,
+}
+
+impl QueryResult {
+    pub fn method(&self, m: Method) -> &MethodResult {
+        match m {
+            Method::Keyword => &self.keyword,
+            Method::Vector => &self.vector,
+            Method::Hybrid => &self.hybrid,
+        }
+    }
+}
+
+/// FNV-1a 64-bit over the embedded fixture text — a deterministic change-detector
+/// (house style, see raki-storage/src/hash.rs; not a security hash). Lets a reviewer
+/// confirm a committed baseline matches the fixtures it was generated from.
+pub fn fixtures_fingerprint() -> String {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in CORPUS_JSON.bytes().chain(QUERIES_JSON.bytes()) {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("{h:016x}")
+}
+
+/// Per-metric float tolerance — these metrics are deterministic functions of rank
+/// positions, so any real drop exceeds this; the epsilon only absorbs float noise.
+const METRIC_EPS: f64 = 1e-9;
+
+/// Compare a fresh run's per-query results against a committed baseline snapshot.
+/// Returns one human-readable message per regression; empty ⇒ no regression.
+/// A gated metric (recall@3, MAP@3, MRR, and — where both runs have them — nDCG@3 and
+/// recall@10) dropping below baseline is a regression. A query present in one run but
+/// not the other demands an explicit re-baseline. `methods` selects which retrieval
+/// methods to check: `[Keyword]` for the deterministic gate, all three for real-model.
+pub fn snapshot_regressions(
+    current: &[QueryResult],
+    baseline: &[QueryResult],
+    methods: &[Method],
+) -> Vec<String> {
+    let mut base: HashMap<&str, &QueryResult> =
+        baseline.iter().map(|q| (q.query.as_str(), q)).collect();
+
+    let mut out = Vec::new();
+    for c in current {
+        let Some(b) = base.remove(c.query.as_str()) else {
+            out.push(format!(
+                "query {:?} not in baseline (new query — re-baseline)",
+                c.query
+            ));
+            continue;
+        };
+        for &m in methods {
+            let (cm, bm) = (c.method(m), b.method(m));
+            let mut check_drop = |name: &str, cv: f64, bv: f64| {
+                if cv + METRIC_EPS < bv {
+                    out.push(format!(
+                        "{:?} [{:?}] {name} {cv:.4} < baseline {bv:.4}",
+                        c.query, m
+                    ));
+                }
+            };
+            check_drop("recall@3", cm.scores.recall, bm.scores.recall);
+            check_drop("MAP@3", cm.scores.map, bm.scores.map);
+            check_drop("MRR", cm.scores.mrr, bm.scores.mrr);
+            if let (Some(cv), Some(bv)) = (cm.scores.ndcg, bm.scores.ndcg) {
+                check_drop("nDCG@3", cv, bv);
+            }
+            if let (Some(cv), Some(bv)) = (cm.scores.recall_cov, bm.scores.recall_cov) {
+                check_drop("recall@10", cv, bv);
+            }
+        }
+    }
+    for (_, b) in base {
+        out.push(format!(
+            "query {:?} in baseline but absent from current run (re-baseline)",
+            b.query
+        ));
+    }
+    out
+}
+
+/// Repo-root `docs/eval` dir, relative to this crate (src-tauri/crates/raki-eval).
+pub fn eval_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../docs/eval")
+}
+
+/// Path to the committed per-query baseline, relative to this crate. `raki-eval` lives at
+/// `src-tauri/crates/raki-eval`, so the repo root is three parents up.
+pub fn snapshot_path() -> std::path::PathBuf {
+    eval_dir().join("snapshot.json")
+}
+
+/// Load the committed baseline snapshot. Returns an error if the file is missing or
+/// malformed — the gate cannot run without a committed baseline (generate it with
+/// `eval-report --write`).
+pub fn load_snapshot() -> Result<Vec<QueryResult>, Box<dyn std::error::Error>> {
+    let path = snapshot_path();
+    let text = std::fs::read_to_string(&path).map_err(|e| {
+        format!(
+            "read snapshot {}: {e} — run `eval-report --write` first",
+            path.display()
+        )
+    })?;
+    Ok(serde_json::from_str(&text)?)
 }
 
 /// Everything one eval run produces.
@@ -453,5 +566,71 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn mk(query: &str, category: &str, kw_recall: f64, ndcg: Option<f64>) -> QueryResult {
+        let scores = MethodScores {
+            recall: kw_recall,
+            map: 1.0,
+            mrr: 1.0,
+            ndcg,
+            recall_cov: None,
+        };
+        let mr = MethodResult {
+            ranked: vec!["n1".into()],
+            scores,
+        };
+        QueryResult {
+            query: query.into(),
+            category: category.into(),
+            set: "dev".into(),
+            keyword: mr.clone(),
+            vector: mr.clone(),
+            hybrid: mr,
+        }
+    }
+
+    #[test]
+    fn identical_runs_have_no_regression() {
+        let base = vec![mk("q1", "lexical-overlap", 1.0, None)];
+        let cur = base.clone();
+        assert!(snapshot_regressions(&cur, &base, &[Method::Keyword]).is_empty());
+    }
+
+    #[test]
+    fn a_metric_drop_is_a_regression() {
+        let base = vec![mk("q1", "lexical-overlap", 1.0, None)];
+        let cur = vec![mk("q1", "lexical-overlap", 0.5, None)];
+        let r = snapshot_regressions(&cur, &base, &[Method::Keyword]);
+        assert_eq!(r.len(), 1, "recall drop must be reported once");
+        assert!(r[0].contains("recall@3"));
+    }
+
+    #[test]
+    fn an_ndcg_drop_on_ordering_is_a_regression() {
+        let base = vec![mk("E0599", "lexical-cluster", 1.0, Some(0.92))];
+        let cur = vec![mk("E0599", "lexical-cluster", 1.0, Some(0.73))];
+        let r = snapshot_regressions(&cur, &base, &[Method::Keyword]);
+        assert!(
+            r.iter().any(|m| m.contains("nDCG@3")),
+            "demoted direct answer must trip nDCG"
+        );
+    }
+
+    #[test]
+    fn an_improvement_is_not_a_regression() {
+        let base = vec![mk("q1", "lexical-overlap", 0.5, None)];
+        let cur = vec![mk("q1", "lexical-overlap", 1.0, None)];
+        assert!(snapshot_regressions(&cur, &base, &[Method::Keyword]).is_empty());
+    }
+
+    #[test]
+    fn a_missing_or_new_query_demands_rebaseline() {
+        let base = vec![mk("q1", "lexical-overlap", 1.0, None)];
+        let cur = vec![mk("q2", "lexical-overlap", 1.0, None)];
+        let r = snapshot_regressions(&cur, &base, &[Method::Keyword]);
+        assert_eq!(r.len(), 2, "q1 absent + q2 new ⇒ two re-baseline messages");
+        assert!(r.iter().any(|m| m.contains("absent")));
+        assert!(r.iter().any(|m| m.contains("not in baseline")));
     }
 }
