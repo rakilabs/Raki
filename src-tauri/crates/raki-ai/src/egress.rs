@@ -176,6 +176,22 @@ mod gate_tests {
         }
     }
 
+    /// An `EgressLog` whose `record` write always fails — to prove the audit-or-fail contract.
+    struct FailingLog;
+    #[async_trait::async_trait]
+    impl EgressLog for FailingLog {
+        async fn record(&self, _rec: &EgressRecord) -> Result<(), DomainError> {
+            Err(DomainError::Storage("disk full".into()))
+        }
+        async fn set_grounded(
+            &self,
+            _id: &EgressLogId,
+            _grounded: bool,
+        ) -> Result<(), DomainError> {
+            Ok(())
+        }
+    }
+
     struct FakeSettings {
         mode: Mode,
         consented: Vec<String>,
@@ -315,5 +331,34 @@ mod gate_tests {
         ));
         assert_eq!(fake.call_count(), 0);
         assert_eq!(log.rows.lock().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn audit_log_failure_fails_the_call_and_returns_no_id() {
+        // The data already left (inner was called once), but the audit write failed — the gate must
+        // surface that as EgressError::Audit rather than hand back a dangling, unlogged id.
+        let fake = Arc::new(FakeLlmProvider::ok("answer"));
+        let g = GatedLlmProvider::new(
+            fake.clone(),
+            Arc::new(FakeSettings {
+                mode: Mode::CloudAllowed,
+                consented: vec!["kimi".to_string()],
+            }),
+            Arc::new(FailingLog),
+            Arc::new(FixedClock(1000)),
+        );
+        let err = g
+            .complete_gated(
+                &decision(&["a"]),
+                CompletionRequest {
+                    system: None,
+                    prompt: "q".into(),
+                    max_tokens: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, EgressError::Audit(_)), "got {err:?}");
+        assert_eq!(fake.call_count(), 1, "the egress did happen");
     }
 }

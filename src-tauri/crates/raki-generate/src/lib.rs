@@ -377,4 +377,26 @@ mod flow_tests {
             "set_grounded(false) persisted for the sent-but-ungrounded answer"
         );
     }
+
+    #[test]
+    fn prosemirror_body_is_flattened_to_text() {
+        let doc = r#"{"type":"doc","content":[
+            {"type":"paragraph","content":[{"type":"text","text":"Pay cash"},{"type":"text","text":" at the ryokan."}]},
+            {"type":"paragraph","content":[{"type":"text","text":"Checkout is 10am."}]}
+        ]}"#;
+        assert_eq!(
+            note_body_to_text(doc),
+            "Pay cash  at the ryokan. Checkout is 10am."
+        );
+    }
+
+    #[test]
+    fn plain_text_body_passes_through_unchanged() {
+        // Not a ProseMirror doc (no type:"doc") → returned verbatim.
+        assert_eq!(note_body_to_text("just plain text"), "just plain text");
+        assert_eq!(
+            note_body_to_text(r#"{"type":"other"}"#),
+            r#"{"type":"other"}"#
+        );
+    }
 }
