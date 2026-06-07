@@ -63,7 +63,7 @@ impl Database {
 /// Register sqlite-vec as an auto-extension exactly once, before any connection
 /// opens. `sqlite3_auto_extension` applies to every connection opened afterward.
 #[allow(clippy::missing_transmute_annotations)]
-fn register_sqlite_vec() {
+pub(crate) fn register_sqlite_vec() {
     static REGISTER: std::sync::Once = std::sync::Once::new();
     REGISTER.call_once(|| unsafe {
         sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));

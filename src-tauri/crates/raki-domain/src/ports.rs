@@ -71,7 +71,12 @@ pub trait Reranker: Send + Sync {
 
 #[derive(Debug)]
 pub struct CompletionRequest {
+    /// System / grounding instructions (rules + numbered context). `None` = no system message.
+    pub system: Option<String>,
+    /// The user's question.
     pub prompt: String,
+    /// Upper bound on completion length. `None` = adapter default.
+    pub max_tokens: Option<u32>,
 }
 #[derive(Debug)]
 pub struct Completion {

@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use rusqlite::{params, OptionalExtension};
 
-use raki_domain::{DomainError, EgressLog, EgressRecord, EgressSettings, Mode};
+use raki_domain::{DomainError, EgressLog, EgressLogId, EgressRecord, EgressSettings, Mode};
 
 use crate::db::Database;
 
@@ -43,6 +43,23 @@ impl EgressLog for SqliteEgressLog {
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![id, created_at, provider, model, token_count, source_ids, success],
                 )?;
+                Ok(())
+            })
+            .await
+    }
+
+    async fn set_grounded(&self, id: &EgressLogId, grounded: bool) -> Result<(), DomainError> {
+        let id = id.to_string();
+        let grounded = grounded as i64;
+        self.db
+            .call(move |c| {
+                let rows = c.execute(
+                    "UPDATE egress_log SET grounded = ?2 WHERE id = ?1",
+                    params![id, grounded],
+                )?;
+                if rows == 0 {
+                    return Err(rusqlite::Error::QueryReturnedNoRows);
+                }
                 Ok(())
             })
             .await
@@ -169,6 +186,21 @@ mod tests {
         assert_eq!(success, 1);
         let ids: Vec<String> = serde_json::from_str(&ids_json).unwrap();
         assert_eq!(ids, vec!["n1".to_string(), "n2".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn set_grounded_updates_the_row() {
+        let db = Database::open_in_memory().unwrap();
+        let log = SqliteEgressLog::new(db.clone());
+        let r = rec();
+        let id = r.id;
+        log.record(&r).await.unwrap();
+        log.set_grounded(&id, false).await.unwrap();
+        let grounded: Option<i64> = db
+            .call(move |c| c.query_row("SELECT grounded FROM egress_log", [], |row| row.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(grounded, Some(0));
     }
 
     #[tokio::test]

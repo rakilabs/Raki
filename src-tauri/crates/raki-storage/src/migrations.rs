@@ -52,6 +52,8 @@ const MIGRATIONS: &[&str] = &[
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     ) STRICT;",
+    // V5: groundedness verdict for a QA answer. Nullable: NULL = not a QA answer / no send.
+    "ALTER TABLE egress_log ADD COLUMN grounded INTEGER;",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
@@ -72,6 +74,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 #[cfg(test)]
 mod tests {
     use crate::db::Database;
+    use crate::migrations::{migrate, MIGRATIONS};
 
     #[tokio::test]
     async fn migration_creates_fts_table() {
@@ -82,6 +85,54 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn v5_grounded_column_applies_to_a_populated_egress_log() {
+        use crate::db::register_sqlite_vec;
+        use rusqlite::Connection;
+
+        register_sqlite_vec(); // auto-extension → vec0 (V3) resolves on a raw connection
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Apply V1..V4 only, then stamp the version so migrate() resumes at V5.
+        for sql in &MIGRATIONS[0..4] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 4i64).unwrap();
+
+        // Populate egress_log BEFORE the ALTER (the point of the fixture).
+        conn.execute(
+            "INSERT INTO egress_log (id, created_at, provider, model, token_count, source_ids, success)
+             VALUES ('row1', 1, 'kimi', 'k2', 10, '[]', 1)" ,
+            [],
+        )
+        .unwrap();
+
+        // Apply the remaining migration(s) — V5's ALTER runs on the populated table.
+        migrate(&conn).unwrap();
+
+        // NOTE: ADD COLUMN ... INTEGER (nullable) is a metadata-only change in SQLite — it does not
+        // rewrite existing rows. This test exists to honor the project's migration contract and to
+        // catch the general class (a future backfilling migration would fail here loudly).
+        let pre: Option<i64> = conn
+            .query_row(
+                "SELECT grounded FROM egress_log WHERE id = 'row1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pre, None, "the pre-existing row gets NULL grounded");
+        conn.execute("UPDATE egress_log SET grounded = 0 WHERE id = 'row1'", [])
+            .unwrap();
+        let post: Option<i64> = conn
+            .query_row(
+                "SELECT grounded FROM egress_log WHERE id = 'row1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(post, Some(0));
     }
 
     #[test]

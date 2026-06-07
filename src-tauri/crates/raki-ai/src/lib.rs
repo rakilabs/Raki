@@ -4,6 +4,7 @@ pub mod egress;
 mod fake;
 mod fake_rerank;
 mod fastembed;
+mod messages;
 mod rerank;
 pub mod testing;
 
@@ -11,4 +12,5 @@ pub use egress::{EgressPolicy, GatedLlmProvider};
 pub use fake::FakeEmbeddingProvider;
 pub use fake_rerank::FakeReranker;
 pub use fastembed::FastEmbedProvider;
+pub use messages::MessagesProvider;
 pub use rerank::{FastEmbedReranker, RERANKER_MODEL_ID};

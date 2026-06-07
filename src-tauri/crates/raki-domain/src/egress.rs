@@ -107,12 +107,16 @@ pub enum EgressError {
     Denied(#[from] EgressDenied),
     #[error("completion failed: {0}")]
     Completion(#[from] DomainError),
+    #[error("egress audit log failed: {0}")]
+    Audit(String),
 }
 
 /// Persist a record of what left (or attempted to leave) the device.
 #[async_trait]
 pub trait EgressLog: Send + Sync {
     async fn record(&self, rec: &EgressRecord) -> Result<(), DomainError>;
+    /// Attach the groundedness verdict to an already-logged egress row.
+    async fn set_grounded(&self, id: &EgressLogId, grounded: bool) -> Result<(), DomainError>;
 }
 
 /// Live-read egress settings: the master mode + per-provider consent. Read every call (no caching).

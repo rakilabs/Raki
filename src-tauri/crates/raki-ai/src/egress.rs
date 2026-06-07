@@ -5,8 +5,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use raki_domain::{
-    Clock, Completion, CompletionRequest, EgressDecision, EgressDenied, EgressError, EgressLog,
-    EgressLogId, EgressRecord, EgressSettings, LlmProvider, Mode,
+    Clock, Completion, CompletionRequest, DomainError, EgressDecision, EgressDenied, EgressError,
+    EgressLog, EgressLogId, EgressRecord, EgressSettings, LlmProvider, Mode,
 };
 
 /// A per-call snapshot of the egress settings. Built fresh from `EgressSettings` on every call —
@@ -118,28 +118,32 @@ impl GatedLlmProvider {
         &self,
         egress: &EgressDecision,
         req: CompletionRequest,
-    ) -> Result<Completion, EgressError> {
+    ) -> Result<(Completion, EgressLogId), EgressError> {
         // Live snapshot — never cached. Run the two reads concurrently.
         let (mode, consented) = tokio::try_join!(self.settings.mode(), self.settings.consented())?;
         let policy = EgressPolicy { mode, consented };
         approve(egress, &policy)?; // EgressDenied → EgressError::Denied; no send, no log row.
 
+        let id = EgressLogId::new();
         let result = self.inner.complete(req).await;
         // Log AFTER the call — record what DID (or did not) leave.
         let rec = EgressRecord {
-            id: EgressLogId::new(),
+            id,
             decision: egress.clone(),
             completed_at: self.clock.now_ms(),
             success: result.is_ok(),
         };
-        // Best-effort: a log write failure must not destroy an expensive completion result. But
-        // this IS the egress audit trail, so a dropped write is a hole we must not hide — surface
-        // it so the gap is detectable. (No structured logging in the workspace yet; stderr is the
-        // consistent channel.)
         if let Err(e) = self.log.record(&rec).await {
-            eprintln!("egress audit log write failed (record dropped): {e}");
+            // Do not hand back an unlogged id: the audit trail is the contract.
+            return Err(EgressError::Audit(e.to_string()));
         }
-        result.map_err(EgressError::Completion)
+        let completion = result.map_err(EgressError::Completion)?;
+        Ok((completion, id))
+    }
+
+    /// Attach the groundedness verdict to a prior gated completion's log row.
+    pub async fn set_grounded(&self, id: &EgressLogId, grounded: bool) -> Result<(), DomainError> {
+        self.log.set_grounded(id, grounded).await
     }
 }
 
@@ -161,6 +165,13 @@ mod gate_tests {
     impl EgressLog for SpyLog {
         async fn record(&self, rec: &EgressRecord) -> Result<(), DomainError> {
             self.rows.lock().unwrap().push(rec.clone());
+            Ok(())
+        }
+        async fn set_grounded(
+            &self,
+            _id: &EgressLogId,
+            _grounded: bool,
+        ) -> Result<(), DomainError> {
             Ok(())
         }
     }
@@ -220,7 +231,14 @@ mod gate_tests {
         let log = Arc::new(SpyLog::default());
         let g = gate(fake.clone(), log.clone(), Mode::LocalOnly, &["kimi"]);
         let err = g
-            .complete_gated(&decision(&["a"]), CompletionRequest { prompt: "q".into() })
+            .complete_gated(
+                &decision(&["a"]),
+                CompletionRequest {
+                    system: None,
+                    prompt: "q".into(),
+                    max_tokens: None,
+                },
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, EgressError::Denied(_)));
@@ -233,8 +251,15 @@ mod gate_tests {
         let fake = Arc::new(FakeLlmProvider::ok("answer"));
         let log = Arc::new(SpyLog::default());
         let g = gate(fake.clone(), log.clone(), Mode::CloudAllowed, &["kimi"]);
-        let out = g
-            .complete_gated(&decision(&["a"]), CompletionRequest { prompt: "q".into() })
+        let (out, id) = g
+            .complete_gated(
+                &decision(&["a"]),
+                CompletionRequest {
+                    system: None,
+                    prompt: "q".into(),
+                    max_tokens: None,
+                },
+            )
             .await
             .unwrap();
         assert_eq!(out.text, "answer");
@@ -243,6 +268,7 @@ mod gate_tests {
         assert_eq!(rows.len(), 1);
         assert!(rows[0].success);
         assert_eq!(rows[0].completed_at, 1000);
+        assert_eq!(rows[0].id, id, "returned id is the logged row's id");
     }
 
     #[tokio::test]
@@ -251,7 +277,14 @@ mod gate_tests {
         let log = Arc::new(SpyLog::default());
         let g = gate(fake.clone(), log.clone(), Mode::CloudAllowed, &["kimi"]);
         let err = g
-            .complete_gated(&decision(&["a"]), CompletionRequest { prompt: "q".into() })
+            .complete_gated(
+                &decision(&["a"]),
+                CompletionRequest {
+                    system: None,
+                    prompt: "q".into(),
+                    max_tokens: None,
+                },
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, EgressError::Completion(_)));
@@ -266,7 +299,14 @@ mod gate_tests {
         let log = Arc::new(SpyLog::default());
         let g = gate(fake.clone(), log.clone(), Mode::CloudAllowed, &["kimi"]);
         let err = g
-            .complete_gated(&decision(&[]), CompletionRequest { prompt: "q".into() })
+            .complete_gated(
+                &decision(&[]),
+                CompletionRequest {
+                    system: None,
+                    prompt: "q".into(),
+                    max_tokens: None,
+                },
+            )
             .await
             .unwrap_err();
         assert!(matches!(

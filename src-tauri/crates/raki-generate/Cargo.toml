@@ -1,17 +1,17 @@
 [package]
-name = "raki-ai"
+name = "raki-generate"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 raki-domain = { workspace = true }
-async-trait = { workspace = true }
-fastembed = "5.15"
-tokio = { workspace = true }
+raki-retrieval = { workspace = true }
+raki-memory = { workspace = true }
+raki-ai = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 
 [dev-dependencies]
 tokio = { workspace = true }
+async-trait = { workspace = true }
