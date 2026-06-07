@@ -86,9 +86,12 @@ mod tests {
     }
 }
 
-/// The ONLY way to obtain a completion. Wraps a raw provider; reads consent live; logs what
-/// actually left (after the call). Constructed inside `raki-ai`; the app holds this, never the
-/// raw `dyn LlmProvider`, so an un-gated call does not type-check outside this crate.
+/// The single intended path to a completion. Wraps a raw provider; reads consent live; logs what
+/// actually left (after the call). The boundary is enforced by *convention*, not the type system:
+/// `LlmProvider::complete` is public in `raki-domain`, so the compiler cannot forbid an un-gated
+/// call. The guarantee holds because `raki-ai` constructs every cloud provider inside this wrapper
+/// and re-exports only `GatedLlmProvider` — never the raw `dyn LlmProvider` — and AGENTS.md forbids
+/// completion calls outside this crate. Keep it that way: don't re-export a raw cloud provider.
 pub struct GatedLlmProvider {
     inner: Arc<dyn LlmProvider>,
     settings: Arc<dyn EgressSettings>,
@@ -129,8 +132,13 @@ impl GatedLlmProvider {
             completed_at: self.clock.now_ms(),
             success: result.is_ok(),
         };
-        // Best-effort: a log write failure must not destroy an expensive completion result.
-        let _ = self.log.record(&rec).await;
+        // Best-effort: a log write failure must not destroy an expensive completion result. But
+        // this IS the egress audit trail, so a dropped write is a hole we must not hide — surface
+        // it so the gap is detectable. (No structured logging in the workspace yet; stderr is the
+        // consistent channel.)
+        if let Err(e) = self.log.record(&rec).await {
+            eprintln!("egress audit log write failed (record dropped): {e}");
+        }
         result.map_err(EgressError::Completion)
     }
 }
