@@ -113,11 +113,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .iter()
                     .find(|c| c.category == cat.category);
                 if let Some(wc) = wc {
+                    // recall@k saturates on a small corpus; the ranking signal lives in MAP.
                     println!(
-                        "    [{}] vec Δrecall {:+.3} | rr Δrecall {:+.3}",
+                        "    [{}] vec Δrecall {:+.3} Δmap {:+.3} | rr Δrecall {:+.3} Δmap {:+.3}",
                         cat.category,
                         cat.vector.recall - wc.vector.recall,
-                        cat.reranked.recall - wc.reranked.recall
+                        cat.vector.map - wc.vector.map,
+                        cat.reranked.recall - wc.reranked.recall,
+                        cat.reranked.map - wc.reranked.map
                     );
                 }
             }

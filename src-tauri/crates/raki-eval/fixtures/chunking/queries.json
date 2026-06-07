@@ -1,10 +1,66 @@
 [
-  { "query": "do we need to bring cash anywhere on the hakone trip", "relevant_ids": ["hakone-trip"], "primary": "hakone-trip", "category": "buried-fact-long-note" },
-  { "query": "why does my coffee taste sharp and watery", "relevant_ids": ["espresso-troubleshooting"], "primary": "espresso-troubleshooting", "category": "non-paragraph-bounded" },
-  { "query": "who pushed back the release and why", "relevant_ids": ["launch-retro"], "primary": "launch-retro", "category": "coreference" },
-  { "query": "did I put saffron on the shopping list", "relevant_ids": ["grocery-list"], "primary": "grocery-list", "category": "buried-list-item" },
-  { "query": "how do I get the database to be ready before the app starts locally", "relevant_ids": ["docker-compose-notes"], "primary": "docker-compose-notes", "category": "code-heavy" },
-  { "query": "how hard should my easy runs be while marathon training", "relevant_ids": ["marathon-plan"], "primary": "marathon-plan", "category": "buried-fact-long-note" },
-  { "query": "when is the september estimated tax payment", "relevant_ids": ["tax-meeting"], "primary": "tax-meeting", "category": "buried-fact-long-note" },
-  { "query": "what should I do when I wake up in the middle of the night", "relevant_ids": ["sleep-notes"], "primary": "sleep-notes", "category": "buried-fact-long-note" }
+  {
+    "query": "do I need to bring cash for the inn in hakone",
+    "relevant_ids": [
+      "japan-trip-log"
+    ],
+    "primary": "japan-trip-log",
+    "category": "buried-fact-long-note"
+  },
+  {
+    "query": "what has to happen before I can install the induction range",
+    "relevant_ids": [
+      "kitchen-reno-log"
+    ],
+    "primary": "kitchen-reno-log",
+    "category": "buried-fact-long-note"
+  },
+  {
+    "query": "who made the call to roll it back",
+    "relevant_ids": [
+      "db-outage-postmortem"
+    ],
+    "primary": "db-outage-postmortem",
+    "category": "coreference"
+  },
+  {
+    "query": "what was the underlying cause of the checkout outage",
+    "relevant_ids": [
+      "db-outage-postmortem"
+    ],
+    "primary": "db-outage-postmortem",
+    "category": "buried-fact-long-note"
+  },
+  {
+    "query": "what supplement was I told to start taking",
+    "relevant_ids": [
+      "annual-physical-notes"
+    ],
+    "primary": "annual-physical-notes",
+    "category": "buried-fact-long-note"
+  },
+  {
+    "query": "is the transmission recall a problem on this car",
+    "relevant_ids": [
+      "used-car-research"
+    ],
+    "primary": "used-car-research",
+    "category": "buried-fact-long-note"
+  },
+  {
+    "query": "did I put saffron on the shopping list",
+    "relevant_ids": [
+      "grocery-list"
+    ],
+    "primary": "grocery-list",
+    "category": "buried-list-item"
+  },
+  {
+    "query": "how do I make the app wait for the database to be ready locally",
+    "relevant_ids": [
+      "compose-stack"
+    ],
+    "primary": "compose-stack",
+    "category": "code-heavy"
+  }
 ]

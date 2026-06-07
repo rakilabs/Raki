@@ -340,11 +340,6 @@ pub async fn run_eval_over(
             k
         };
 
-        let q_emb = embedder.embed(std::slice::from_ref(&q.query)).await?;
-        let q_emb = q_emb.into_iter().next().ok_or_else(|| {
-            DomainError::Provider("embedder returned empty batch for query".to_string())
-        })?;
-
         let kw = dedup_to_note(&to_fixture(
             &search(&keyword, &q.query, cov_k.max(k)).await?,
             &fixture_of,
@@ -355,6 +350,11 @@ pub async fn run_eval_over(
                 &fixture_of,
             )),
             Rollup::ScoreMax => {
+                // Embed the query only here — MinRank re-embeds inside vector_search.
+                let q_emb = embedder.embed(std::slice::from_ref(&q.query)).await?;
+                let q_emb = q_emb.into_iter().next().ok_or_else(|| {
+                    DomainError::Provider("embedder returned empty batch for query".to_string())
+                })?;
                 let hits = vectors.query(&q_emb, RERANK_POOL).await?;
                 let scored: Vec<(String, f32)> = hits
                     .into_iter()
