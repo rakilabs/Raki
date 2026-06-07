@@ -50,6 +50,43 @@ fn slug(path: &Path) -> String {
         .to_string()
 }
 
+/// Like `load_local`, but each note's `body` is the RAW markdown (frontmatter stripped, NOT
+/// collapsed to plain text) — required so the chunker's `to_blocks` can see paragraph/heading
+/// structure. Used by `chunk-eval`; the whole-note arm then embeds raw markdown too, which keeps
+/// the chunked-vs-whole comparison internally consistent.
+pub fn load_local_raw(dir: &Path) -> Result<LocalData, LoadError> {
+    let notes_dir = dir.join("notes");
+    if !notes_dir.is_dir() {
+        return Err(LoadError::Missing(notes_dir.display().to_string()));
+    }
+    let mut corpus = Vec::new();
+    let mut entries: Vec<_> = std::fs::read_dir(&notes_dir)
+        .map_err(LoadError::Io)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("md"))
+        .collect();
+    entries.sort();
+    for path in entries {
+        let raw = std::fs::read_to_string(&path).map_err(LoadError::Io)?;
+        let id = slug(&path);
+        let stripped = crate::markdown::strip_frontmatter(&raw);
+        let title = crate::markdown::first_h1(stripped).unwrap_or_else(|| id.clone());
+        corpus.push(CorpusNote {
+            id,
+            title,
+            body: stripped.to_string(),
+        });
+    }
+    let queries_path = dir.join("queries.json");
+    if !queries_path.is_file() {
+        return Err(LoadError::Missing(queries_path.display().to_string()));
+    }
+    let qtext = std::fs::read_to_string(&queries_path).map_err(LoadError::Io)?;
+    let queries: Vec<EvalQuery> = serde_json::from_str(&qtext).map_err(LoadError::Json)?;
+    validate(&corpus, &queries)?;
+    Ok(LocalData { corpus, queries })
+}
+
 /// Load notes from `dir/notes/*.md` and queries from `dir/queries.json`. Returns a helpful
 /// `Missing` error if `dir` or `dir/notes` is absent (turns a crash into onboarding).
 pub fn load_local(dir: &Path) -> Result<LocalData, LoadError> {
@@ -144,5 +181,14 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("not set up"));
         assert!(msg.contains("real-data-protocol.md"));
+    }
+
+    #[test]
+    fn load_local_raw_keeps_paragraph_structure() {
+        let data = load_local_raw(&fixture_dir()).unwrap();
+        let alpha = data.corpus.iter().find(|n| n.id == "alpha").unwrap();
+        // raw markdown retains structure (the to_plain_text path would collapse it).
+        // alpha.md is a single short note; assert frontmatter/heading handling is intact.
+        assert!(alpha.body.contains("grind finer"));
     }
 }

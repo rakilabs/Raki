@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+pub mod chunk;
 pub mod local_corpus;
 pub mod markdown;
 pub mod realmetrics;
@@ -54,9 +55,20 @@ pub fn load_queries() -> Vec<EvalQuery> {
     serde_json::from_str(QUERIES_JSON).expect("queries.json is valid")
 }
 
+/// Load the committed synthetic chunking corpus + queries (Task 5 fixtures).
+pub fn load_chunking_corpus() -> Vec<CorpusNote> {
+    let raw = include_str!("../fixtures/chunking/corpus.json");
+    serde_json::from_str(raw).expect("chunking corpus.json parses")
+}
+pub fn load_chunking_queries() -> Vec<EvalQuery> {
+    let raw = include_str!("../fixtures/chunking/queries.json");
+    serde_json::from_str(raw).expect("chunking queries.json parses")
+}
+
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use crate::chunk::{chunk, ChunkStrategy, PrefixMode, Rollup};
 use raki_domain::{
     DomainError, EmbeddingProvider, Note, NoteId, NoteRepository, Reranker, VectorIndex,
 };
@@ -255,18 +267,24 @@ const RERANK_POOL: usize = 20;
 /// plus per-query detail.
 /// Run the eval over a CALLER-SUPPLIED corpus + queries (the synthetic fixtures, or a local
 /// real-notes set). All retrieval/scoring logic lives here; `run_eval` is the fixture wrapper.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_eval_over(
     corpus: &[CorpusNote],
     queries: &[EvalQuery],
     embedder: Arc<dyn EmbeddingProvider>,
     reranker: Arc<dyn Reranker>,
     k: usize,
+    strategy: ChunkStrategy,
+    prefix: PrefixMode,
+    rollup: Rollup,
 ) -> Result<EvalRun, DomainError> {
     let db = Database::open_in_memory()?;
     let repo = SqliteNoteRepository::new(db.clone());
     let keyword = SqliteKeywordIndex::new(db.clone());
     let vectors = SqliteVectorIndex::new(db.clone());
 
+    // text_of is keyed by BOTH chunk id and note uuid → the text to (re)rank for that id.
+    // fixture_of maps both chunk ids and the note uuid to the fixture slug.
     let mut fixture_of: HashMap<String, String> = HashMap::new();
     let mut text_of: HashMap<String, String> = HashMap::new();
     for (idx, cn) in corpus.iter().enumerate() {
@@ -280,15 +298,31 @@ pub async fn run_eval_over(
         note.id = NoteId::parse(&format!("00000000-0000-7000-8000-{:012x}", idx + 1))
             .expect("synthetic fixture uuid is well-formed");
         let uuid = note.id.to_string();
-        repo.upsert(&note).await?;
-        let doc = format!("{}\n\n{}", cn.title, cn.body);
-        text_of.insert(cn.id.clone(), doc.clone());
-        let emb = embedder.embed(std::slice::from_ref(&doc)).await?;
-        let emb = emb.first().ok_or_else(|| {
-            DomainError::Provider("embedder returned empty batch for single doc".to_string())
-        })?;
-        vectors.upsert(&uuid, emb).await?;
-        fixture_of.insert(uuid, cn.id.clone());
+        repo.upsert(&note).await?; // keyword/FTS5 over the WHOLE note — unchanged, gate-safe.
+
+        // Note-level entries: keyword hits return the uuid; keyword-backfilled rerank candidates
+        // need the whole-note text.
+        let whole = format!("{}\n\n{}", cn.title, cn.body);
+        fixture_of.insert(uuid.clone(), cn.id.clone());
+        text_of.insert(uuid.clone(), whole.clone());
+
+        let texts = chunk(&cn.title, &cn.body, strategy, prefix);
+        for (j, text) in texts.iter().enumerate() {
+            // WholeNote (single chunk): id == note uuid, so the vector keying is byte-identical to
+            // the legacy path. Blocks: `uuid#j`.
+            let chunk_id = if strategy == ChunkStrategy::WholeNote {
+                uuid.clone()
+            } else {
+                format!("{uuid}#{j}")
+            };
+            let emb = embedder.embed(std::slice::from_ref(text)).await?;
+            let emb = emb.first().ok_or_else(|| {
+                DomainError::Provider("embedder returned empty batch".to_string())
+            })?;
+            vectors.upsert(&chunk_id, emb).await?;
+            fixture_of.insert(chunk_id.clone(), cn.id.clone());
+            text_of.insert(chunk_id, text.clone());
+        }
     }
 
     let mut per_query: Vec<QueryResult> = Vec::new();
@@ -306,15 +340,30 @@ pub async fn run_eval_over(
             k
         };
 
-        let kw = to_fixture(
+        let q_emb = embedder.embed(std::slice::from_ref(&q.query)).await?;
+        let q_emb = q_emb.into_iter().next().ok_or_else(|| {
+            DomainError::Provider("embedder returned empty batch for query".to_string())
+        })?;
+
+        let kw = dedup_to_note(&to_fixture(
             &search(&keyword, &q.query, cov_k.max(k)).await?,
             &fixture_of,
-        );
-        let vc = to_fixture(
-            &vector_search(&vectors, embedder.as_ref(), &q.query, cov_k.max(k)).await?,
-            &fixture_of,
-        );
-        let hy = to_fixture(
+        ));
+        let vc = match rollup {
+            Rollup::MinRank => dedup_to_note(&to_fixture(
+                &vector_search(&vectors, embedder.as_ref(), &q.query, cov_k.max(k)).await?,
+                &fixture_of,
+            )),
+            Rollup::ScoreMax => {
+                let hits = vectors.query(&q_emb, RERANK_POOL).await?;
+                let scored: Vec<(String, f32)> = hits
+                    .into_iter()
+                    .map(|h| (h.source_id, h.distance))
+                    .collect();
+                score_max_notes(&scored, &fixture_of)
+            }
+        };
+        let hy = dedup_to_note(&to_fixture(
             &hybrid_search(
                 &keyword,
                 &vectors,
@@ -324,17 +373,36 @@ pub async fn run_eval_over(
             )
             .await?,
             &fixture_of,
-        );
-        let pool_ids = to_fixture(
-            &hybrid_candidates(&keyword, &vectors, embedder.as_ref(), &q.query, RERANK_POOL)
-                .await?,
-            &fixture_of,
-        );
-        let candidates: Vec<(String, String)> = pool_ids
+        ));
+        let raw_pool =
+            hybrid_candidates(&keyword, &vectors, embedder.as_ref(), &q.query, RERANK_POOL).await?;
+        let candidates: Vec<(String, String)> = raw_pool
             .iter()
-            .filter_map(|fid| text_of.get(fid).map(|t| (fid.clone(), t.clone())))
+            .filter_map(|id| text_of.get(id).map(|t| (id.clone(), t.clone())))
             .collect();
-        let rr = rerank(reranker.as_ref(), &q.query, &candidates, cov_k.max(k)).await?;
+        let rr = match rollup {
+            Rollup::MinRank => dedup_to_note(&to_fixture(
+                &rerank(reranker.as_ref(), &q.query, &candidates, RERANK_POOL).await?,
+                &fixture_of,
+            )),
+            Rollup::ScoreMax => {
+                let scores = reranker
+                    .rerank(
+                        &q.query,
+                        &candidates
+                            .iter()
+                            .map(|(_, t)| t.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                    .await?;
+                // higher score = better; convert to a "distance" (negate) so score_max_notes' min works.
+                let as_dist: Vec<(String, f32)> = scores
+                    .into_iter()
+                    .map(|s| (candidates[s.index].0.clone(), -s.score))
+                    .collect();
+                score_max_notes(&as_dist, &fixture_of)
+            }
+        };
 
         per_query.push(QueryResult {
             query: q.query.clone(),
@@ -369,7 +437,17 @@ pub async fn run_eval(
     reranker: Arc<dyn Reranker>,
     k: usize,
 ) -> Result<EvalRun, DomainError> {
-    run_eval_over(&load_corpus(), &load_queries(), embedder, reranker, k).await
+    run_eval_over(
+        &load_corpus(),
+        &load_queries(),
+        embedder,
+        reranker,
+        k,
+        ChunkStrategy::WholeNote,
+        PrefixMode::Title,
+        Rollup::MinRank,
+    )
+    .await
 }
 
 fn truncate(ids: &[String], k: usize) -> Vec<String> {
@@ -451,6 +529,45 @@ fn mean_scores(it: impl Iterator<Item = MethodScores>) -> MethodScores {
         ndcg: opt_mean(&|s| s.ndcg),
         recall_cov: opt_mean(&|s| s.recall_cov),
     }
+}
+
+/// Roll chunk hits up to a note ranking by SCORE-MAX: each note's score is its best (lowest-
+/// distance) chunk; notes are ordered best-first. Distinct from min-rank when a note's best chunk
+/// is not its first-appearing chunk (after rerank, or with quantization noise) — see spec D4.
+fn score_max_notes(
+    hits: &[(String, f32)],
+    fixture_of: &std::collections::HashMap<String, String>,
+) -> Vec<String> {
+    use std::collections::HashMap;
+    let mut best: HashMap<String, f32> = HashMap::new();
+    for (chunk_id, dist) in hits {
+        if let Some(slug) = fixture_of.get(chunk_id) {
+            best.entry(slug.clone())
+                .and_modify(|d| {
+                    if *dist < *d {
+                        *d = *dist
+                    }
+                })
+                .or_insert(*dist);
+        }
+    }
+    let mut notes: Vec<(String, f32)> = best.into_iter().collect();
+    notes.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    notes.into_iter().map(|(slug, _)| slug).collect()
+}
+
+/// Roll a chunk-level slug list up to a note ranking by MIN-RANK: a note's position is its
+/// first (best-ranked) chunk. A no-op when each note has one chunk (WholeNote). NOT score-max
+/// (a note's best-*scored* chunk) — see `score_max_notes` and the spec D4.
+fn dedup_to_note(slugs: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for s in slugs {
+        if seen.insert(s.clone()) {
+            out.push(s.clone());
+        }
+    }
+    out
 }
 
 fn to_fixture(
@@ -753,5 +870,45 @@ mod tests {
         assert_eq!(r.len(), 2, "q1 absent + q2 new ⇒ two re-baseline messages");
         assert!(r.iter().any(|m| m.contains("absent")));
         assert!(r.iter().any(|m| m.contains("not in baseline")));
+    }
+
+    #[test]
+    fn dedup_to_note_keeps_first_occurrence_order() {
+        // chunk hits map to slugs with repeats; min-rank = first occurrence per note.
+        let slugs = vec!["a".into(), "a".into(), "b".into(), "a".into(), "c".into()];
+        assert_eq!(
+            dedup_to_note(&slugs),
+            vec!["a".to_string(), "b".into(), "c".into()]
+        );
+        assert_eq!(dedup_to_note(&[]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn score_max_orders_notes_by_best_chunk_and_can_differ_from_min_rank() {
+        // chunk hits (id, distance) — lower distance = better. fixture maps chunks→notes.
+        let mut fx = std::collections::HashMap::new();
+        fx.insert("X#0".to_string(), "X".to_string());
+        fx.insert("X#1".to_string(), "X".to_string());
+        fx.insert("Y#0".to_string(), "Y".to_string());
+        // rank order (by distance): X#0(0.30), Y#0(0.31), X#1(0.10)
+        let _hits = [
+            (("X#0").to_string(), 0.30_f32),
+            (("Y#0").to_string(), 0.31),
+            (("X#1").to_string(), 0.10),
+        ];
+        // min-rank would be [X, Y] (X first at rank 1). score-max sees X's best is 0.10 < Y's 0.31,
+        // and Y's best 0.31 — so X then Y; here they agree on X, but the BEST score for X is X#1
+        // not X#0, which min-rank could never surface. Construct divergence with a third note:
+        fx.insert("Z#0".to_string(), "Z".to_string());
+        let hits2 = vec![
+            (("Z#0").to_string(), 0.20_f32), // Z best 0.20, rank 1
+            (("X#0").to_string(), 0.25),     // X first appears rank 2
+            (("X#1").to_string(), 0.05),     // X best 0.05 (better than Z) but rank 3
+        ];
+        // min-rank: [Z, X]; score-max: [X, Z] (X's best 0.05 beats Z's 0.20).
+        assert_eq!(
+            score_max_notes(&hits2, &fx),
+            vec!["X".to_string(), "Z".into()]
+        );
     }
 }

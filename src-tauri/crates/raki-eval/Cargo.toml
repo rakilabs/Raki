@@ -15,6 +15,10 @@ path = "src/main.rs"
 name = "real-eval"
 path = "src/bin/real-eval.rs"
 
+[[bin]]
+name = "chunk-eval"
+path = "src/bin/chunk-eval.rs"
+
 [dependencies]
 raki-domain = { workspace = true }
 raki-storage = { workspace = true }

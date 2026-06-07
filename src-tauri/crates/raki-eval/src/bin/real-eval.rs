@@ -69,7 +69,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let reranker = Arc::new(FastEmbedReranker::try_new()?);
     let model = embedder.model_id();
     let reranker_model = reranker.model_id();
-    let run = run_eval_over(&data.corpus, &data.queries, embedder, reranker, K).await?;
+    let run = run_eval_over(
+        &data.corpus,
+        &data.queries,
+        embedder,
+        reranker,
+        K,
+        raki_eval::chunk::ChunkStrategy::WholeNote,
+        raki_eval::chunk::PrefixMode::Title,
+        raki_eval::chunk::Rollup::MinRank,
+    )
+    .await?;
 
     // Aggregate per method (overall) and per (method, category) — category stays LOCAL only.
     let mut overall: HashMap<&str, Agg> =

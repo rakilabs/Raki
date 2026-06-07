@@ -34,6 +34,15 @@ Re-running early is fine; the dates are the *latest* a run should slip to.
 - [ ] 2027-03-06 — quarterly
 - [ ] 2027-06-06 — quarterly (then continue quarterly)
 
+## Chunking measurement (added for the chunk-eval slice)
+- Run `cargo run -p raki-eval --bin chunk-eval`; it reads `eval-data/real/` via the raw-markdown
+  loader (preserves paragraph/heading structure for chunking) and prints whole-vs-chunked deltas.
+- **Sample the messiest notes**, not just the longest: long multi-section notes, list-heavy notes,
+  code-heavy notes, and mixed-language notes — these are where structural chunking and
+  prefix↔tokenization interactions break. The promotion gate reads the **long-note stratum**.
+- The chunked-vs-whole delta is computed within a single run over the identically-loaded set, so
+  attribution is exact; cross-run drift (a living corpus) is inherent and acceptable.
+
 ## What the numbers are NOT
 Directional, not statistically powered (~20–40 queries); optimistic ceiling (authorship bias);
 whole-note plain text, not block-aware. Do not decide the reranker's fate (D-DELETE) on this set.
