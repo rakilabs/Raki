@@ -3805,6 +3805,7 @@ dependencies = [
  "raki-domain",
  "rusqlite",
  "serde",
+ "serde_json",
  "sqlite-vec",
  "tokio",
  "unicode-normalization",

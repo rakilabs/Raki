@@ -1,6 +1,7 @@
 //! Raki domain kernel: pure types, value objects, and port traits. No IO, no tauri, no SQL.
 
 pub mod clock;
+pub mod egress;
 pub mod error;
 pub mod ids;
 pub mod note;
@@ -8,6 +9,10 @@ pub mod ports;
 pub mod testing;
 
 pub use clock::Clock;
+pub use egress::{
+    EgressDecision, EgressDenied, EgressError, EgressLog, EgressLogId, EgressRecord,
+    EgressSettings, Mode, SourceId,
+};
 pub use error::DomainError;
 pub use ids::NoteId;
 pub use note::Note;

@@ -1,0 +1,190 @@
+//! SQLite adapters for the egress audit log and the consent/mode settings.
+
+use async_trait::async_trait;
+use rusqlite::{params, OptionalExtension};
+
+use raki_domain::{DomainError, EgressLog, EgressRecord, EgressSettings, Mode};
+
+use crate::db::Database;
+
+pub struct SqliteEgressLog {
+    db: Database,
+}
+impl SqliteEgressLog {
+    pub fn new(db: Database) -> Self {
+        Self { db }
+    }
+}
+
+pub struct SqliteEgressSettings {
+    db: Database,
+}
+impl SqliteEgressSettings {
+    pub fn new(db: Database) -> Self {
+        Self { db }
+    }
+}
+
+#[async_trait]
+impl EgressLog for SqliteEgressLog {
+    async fn record(&self, rec: &EgressRecord) -> Result<(), DomainError> {
+        let id = rec.id.to_string();
+        let created_at = rec.completed_at;
+        let provider = rec.decision.provider.clone();
+        let model = rec.decision.model.clone();
+        let token_count = rec.decision.total_tokens as i64;
+        let source_ids = serde_json::to_string(&rec.decision.source_ids)
+            .map_err(|e| DomainError::Storage(format!("serialize source_ids: {e}")))?;
+        let success = rec.success as i64;
+        self.db
+            .call(move |c| {
+                c.execute(
+                    "INSERT INTO egress_log (id, created_at, provider, model, token_count, source_ids, success)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![id, created_at, provider, model, token_count, source_ids, success],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+}
+
+const EGRESS_MODE_KEY: &str = "egress_mode";
+
+#[async_trait]
+impl EgressSettings for SqliteEgressSettings {
+    async fn mode(&self) -> Result<Mode, DomainError> {
+        let v: Option<String> = self
+            .db
+            .call(move |c| {
+                c.query_row(
+                    "SELECT value FROM app_settings WHERE key = ?1",
+                    params![EGRESS_MODE_KEY],
+                    |r| r.get(0),
+                )
+                .optional()
+            })
+            .await?;
+        Ok(match v.as_deref() {
+            Some("cloud") => Mode::CloudAllowed,
+            _ => Mode::LocalOnly, // default + any unknown value ⇒ safe
+        })
+    }
+
+    async fn consented(&self) -> Result<std::collections::HashSet<String>, DomainError> {
+        self.db
+            .call(|c| {
+                let mut stmt = c.prepare("SELECT provider FROM cloud_consent")?;
+                let rows = stmt
+                    .query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<std::collections::HashSet<String>>>()?;
+                Ok(rows)
+            })
+            .await
+    }
+
+    async fn set_mode(&self, mode: Mode) -> Result<(), DomainError> {
+        let value = match mode {
+            Mode::LocalOnly => "local",
+            Mode::CloudAllowed => "cloud",
+        };
+        self.db
+            .call(move |c| {
+                c.execute(
+                    "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![EGRESS_MODE_KEY, value],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
+    async fn grant(&self, provider: &str) -> Result<(), DomainError> {
+        let provider = provider.to_string();
+        // granted_at: a monotonic-ish stamp; the gate doesn't read it, so a constant is fine here.
+        self.db
+            .call(move |c| {
+                c.execute(
+                    "INSERT INTO cloud_consent (provider, granted_at) VALUES (?1, ?2)
+                     ON CONFLICT(provider) DO NOTHING",
+                    params![provider, 0_i64],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
+    async fn revoke(&self, provider: &str) -> Result<(), DomainError> {
+        let provider = provider.to_string();
+        self.db
+            .call(move |c| {
+                c.execute(
+                    "DELETE FROM cloud_consent WHERE provider = ?1",
+                    params![provider],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use raki_domain::{EgressDecision, EgressLogId, SourceId};
+    use std::collections::HashSet;
+
+    fn rec() -> EgressRecord {
+        EgressRecord {
+            id: EgressLogId::new(),
+            decision: EgressDecision {
+                provider: "kimi".into(),
+                model: "k2".into(),
+                source_ids: vec![SourceId("n1".into()), SourceId("n2".into())],
+                total_tokens: 42,
+            },
+            completed_at: 1000,
+            success: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn log_record_roundtrips_source_ids_json() {
+        let db = Database::open_in_memory().unwrap();
+        let log = SqliteEgressLog::new(db.clone());
+        let r = rec();
+        log.record(&r).await.unwrap();
+        let (provider, ids_json, success): (String, String, i64) = db
+            .call(move |c| {
+                c.query_row(
+                    "SELECT provider, source_ids, success FROM egress_log",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(provider, "kimi");
+        assert_eq!(success, 1);
+        let ids: Vec<String> = serde_json::from_str(&ids_json).unwrap();
+        assert_eq!(ids, vec!["n1".to_string(), "n2".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn settings_default_local_only_then_grant_and_revoke() {
+        let db = Database::open_in_memory().unwrap();
+        let s = SqliteEgressSettings::new(db.clone());
+        assert_eq!(s.mode().await.unwrap(), Mode::LocalOnly); // default when unset
+        assert!(s.consented().await.unwrap().is_empty());
+        s.set_mode(Mode::CloudAllowed).await.unwrap();
+        assert_eq!(s.mode().await.unwrap(), Mode::CloudAllowed);
+        s.grant("kimi").await.unwrap();
+        assert_eq!(
+            s.consented().await.unwrap(),
+            HashSet::from(["kimi".to_string()])
+        );
+        s.revoke("kimi").await.unwrap();
+        assert!(s.consented().await.unwrap().is_empty());
+    }
+}

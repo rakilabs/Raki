@@ -1,12 +1,13 @@
 //! AI provider adapters (local + cloud) and the egress/consent policy.
 
-mod egress;
+pub mod egress;
 mod fake;
 mod fake_rerank;
 mod fastembed;
 mod rerank;
+pub mod testing;
 
-pub use egress::EgressPolicy;
+pub use egress::{EgressPolicy, GatedLlmProvider};
 pub use fake::FakeEmbeddingProvider;
 pub use fake_rerank::FakeReranker;
 pub use fastembed::FastEmbedProvider;

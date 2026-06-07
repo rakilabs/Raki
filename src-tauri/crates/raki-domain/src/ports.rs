@@ -69,9 +69,11 @@ pub trait Reranker: Send + Sync {
 
 // --- Ports defined for the architecture; implemented in later plans. ---
 
+#[derive(Debug)]
 pub struct CompletionRequest {
     pub prompt: String,
 }
+#[derive(Debug)]
 pub struct Completion {
     pub text: String,
 }

@@ -33,6 +33,25 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE notes ADD COLUMN content_hash TEXT;
     ALTER TABLE notes ADD COLUMN embedded_hash TEXT;
     ALTER TABLE notes ADD COLUMN embedded_model TEXT;",
+    // V4: egress audit log + cloud consent + a tiny settings kv (egress mode). Audit/system tables:
+    // id + timestamps, no soft-delete/version (not user-data).
+    "CREATE TABLE egress_log (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        token_count INTEGER NOT NULL,
+        source_ids TEXT NOT NULL,   -- JSON array of source id strings
+        success INTEGER NOT NULL
+    ) STRICT;
+    CREATE TABLE cloud_consent (
+        provider TEXT PRIMARY KEY,
+        granted_at INTEGER NOT NULL
+    ) STRICT;
+    CREATE TABLE app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    ) STRICT;",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
