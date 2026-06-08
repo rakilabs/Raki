@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+pub mod benchmark;
 pub mod chunk;
 pub mod local_corpus;
 pub mod markdown;
@@ -262,6 +263,26 @@ const COVERAGE_K: usize = 10;
 /// `raki_retrieval::HYBRID_CANDIDATE_POOL`; production may later use a latency-bounded window.
 const RERANK_POOL: usize = 20;
 
+/// Construct a fresh, empty in-memory index stack (relational + FTS5 + vectors) in one SQLite
+/// file. The single source of truth for index construction — both `run_eval_over` (synthetic
+/// fixtures) and `run_benchmark` (BEIR) build on it (AGENTS.md §5/§9). Callers do their own
+/// corpus-loading loop (chunked vs whole-doc differ).
+pub(crate) fn build_in_memory_index() -> Result<
+    (
+        Database,
+        SqliteNoteRepository,
+        SqliteKeywordIndex,
+        SqliteVectorIndex,
+    ),
+    DomainError,
+> {
+    let db = Database::open_in_memory()?;
+    let repo = SqliteNoteRepository::new(db.clone());
+    let keyword = SqliteKeywordIndex::new(db.clone());
+    let vectors = SqliteVectorIndex::new(db.clone());
+    Ok((db, repo, keyword, vectors))
+}
+
 /// Build a fresh in-memory index from the golden set, embed every document directly,
 /// then score keyword and vector retrieval per query. Returns aggregated metrics
 /// plus per-query detail.
@@ -278,10 +299,7 @@ pub async fn run_eval_over(
     prefix: PrefixMode,
     rollup: Rollup,
 ) -> Result<EvalRun, DomainError> {
-    let db = Database::open_in_memory()?;
-    let repo = SqliteNoteRepository::new(db.clone());
-    let keyword = SqliteKeywordIndex::new(db.clone());
-    let vectors = SqliteVectorIndex::new(db.clone());
+    let (_db, repo, keyword, vectors) = build_in_memory_index()?;
 
     // text_of is keyed by BOTH chunk id and note uuid → the text to (re)rank for that id.
     // fixture_of maps both chunk ids and the note uuid to the fixture slug.
