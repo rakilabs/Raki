@@ -96,17 +96,18 @@ fn note_body_to_text(body: &str) -> String {
     }
 }
 
-pub async fn answer_question(
+/// Retrieve + assemble locally (no model call). Returns the assembled context and an
+/// id→title map for the included sources, or `None` when nothing matched.
+async fn assemble_for(
     query: &str,
     deps: &GenerateDeps<'_>,
-) -> Result<Answer, GenerateError> {
+) -> Result<Option<(AssembledContext, std::collections::HashMap<String, String>)>, GenerateError> {
     let ids = hybrid_search(deps.keyword, deps.vectors, deps.embedder, query, deps.k)
         .await
         .map_err(GenerateError::Domain)?;
 
-    // Resolve ids → notes. hybrid_search already ranked best-first; keep that order via descending
-    // synthetic scores (assemble_context sorts by score). Missing notes are simply skipped.
     let mut candidates = Vec::new();
+    let mut titles = std::collections::HashMap::new();
     for (rank, id) in ids.iter().enumerate() {
         let nid = match NoteId::parse(id) {
             Ok(n) => n,
@@ -116,6 +117,7 @@ pub async fn answer_question(
             }
         };
         if let Some(note) = deps.notes.get(&nid).await.map_err(GenerateError::Domain)? {
+            titles.insert(id.clone(), note.title.clone());
             candidates.push(Candidate {
                 source_id: id.clone(),
                 text: format!("{}\n{}", note.title, note_body_to_text(&note.body)),
@@ -123,45 +125,71 @@ pub async fn answer_question(
             });
         }
     }
-
     if candidates.is_empty() {
+        return Ok(None);
+    }
+    let ctx = assemble_context(&candidates, deps.budget, deps.provider, deps.model);
+    Ok(Some((ctx, titles)))
+}
+
+pub async fn answer_question(
+    query: &str,
+    deps: &GenerateDeps<'_>,
+) -> Result<Answer, GenerateError> {
+    let Some((ctx, _titles)) = assemble_for(query, deps).await? else {
         return Ok(Answer {
             state: AnswerState::NothingMatched,
             text: "No relevant notes found.".into(),
             cited_ids: vec![],
             egress_log_id: None,
         });
-    }
-
-    let ctx = assemble_context(&candidates, deps.budget, deps.provider, deps.model);
+    };
     let req = CompletionRequest {
         system: Some(build_system_prompt(&ctx)),
         prompt: query.to_string(),
-        // `None` → the adapter applies its own `DEFAULT_MAX_TOKENS` (review #7: single source of truth).
         max_tokens: None,
     };
-
     let (completion, log_id) = deps
         .gate
         .complete_gated(&ctx.egress, req)
         .await
         .map_err(GenerateError::Egress)?;
-
     let context_ids: std::collections::HashSet<String> =
         ctx.egress.source_ids.iter().map(|s| s.0.clone()).collect();
     let (state, text, cited_ids) = evaluate(&completion.text, &context_ids);
-
     deps.gate
         .set_grounded(&log_id, state.is_grounded())
         .await
         .map_err(GenerateError::Domain)?;
+    Ok(Answer { state, text, cited_ids, egress_log_id: Some(log_id) })
+}
 
-    Ok(Answer {
-        state,
-        text,
-        cited_ids,
-        egress_log_id: Some(log_id),
-    })
+/// What a cloud send WOULD disclose — shown to the user before consent (spec D7). Metadata only.
+pub struct EgressPreview {
+    pub provider: String,
+    pub summary: String,
+    pub source_titles: Vec<String>,
+}
+
+/// The egress preview for `query` (no send), or `None` if nothing matched.
+pub async fn preview(
+    query: &str,
+    deps: &GenerateDeps<'_>,
+) -> Result<Option<EgressPreview>, GenerateError> {
+    let Some((ctx, titles)) = assemble_for(query, deps).await? else {
+        return Ok(None);
+    };
+    let source_titles = ctx
+        .egress
+        .source_ids
+        .iter()
+        .map(|s| titles.get(&s.0).cloned().unwrap_or_else(|| s.0.clone()))
+        .collect();
+    Ok(Some(EgressPreview {
+        provider: deps.provider.to_string(),
+        summary: ctx.egress.summary(),
+        source_titles,
+    }))
 }
 
 #[cfg(test)]
@@ -398,5 +426,35 @@ mod flow_tests {
             note_body_to_text(r#"{"type":"other"}"#),
             r#"{"type":"other"}"#
         );
+    }
+
+    #[tokio::test]
+    async fn preview_returns_egress_metadata_without_sending() {
+        let nid = NoteId::new();
+        let fake = Arc::new(FakeLlmProvider::ok("unused"));
+        let log = Arc::new(SpyLog::default());
+        let g = gate(fake.clone(), log.clone());
+        let deps = GenerateDeps {
+            keyword: &NoKeyword, vectors: &OneVector(nid.to_string()), embedder: &FakeEmbed,
+            notes: &OneNote(nid), gate: &g, provider: "kimi", model: "k2", budget: 10_000, k: 5,
+        };
+        let p = preview("how do I pay?", &deps).await.unwrap().expect("some preview");
+        assert_eq!(p.provider, "kimi");
+        assert_eq!(p.source_titles, vec!["Trip".to_string()]);
+        assert!(p.summary.contains("→ kimi/k2"));
+        assert_eq!(fake.call_count(), 0, "preview never sends");
+    }
+
+    #[tokio::test]
+    async fn preview_is_none_when_nothing_matched() {
+        let nid = NoteId::new();
+        let fake = Arc::new(FakeLlmProvider::ok("unused"));
+        let log = Arc::new(SpyLog::default());
+        let g = gate(fake, log);
+        let deps = GenerateDeps {
+            keyword: &NoKeyword, vectors: &OneVector(nid.to_string()), embedder: &FakeEmbed,
+            notes: &EmptyRepo, gate: &g, provider: "kimi", model: "k2", budget: 10_000, k: 5,
+        };
+        assert!(preview("x", &deps).await.unwrap().is_none());
     }
 }
