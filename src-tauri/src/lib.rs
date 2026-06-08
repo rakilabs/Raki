@@ -55,6 +55,9 @@ impl LlmProvider for UnconfiguredProvider {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Load .env if present so cloud provider config doesn't require shell exports.
+    let _ = dotenvy::dotenv();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
