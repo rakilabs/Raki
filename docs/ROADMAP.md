@@ -33,19 +33,25 @@
 
 > Pursued in ADR-0006 order. Each milestone is a measured slice, not a guess.
 
-### ▶ R0 — Measurement foundation *(the gate — benchmark-first)*
+### ✅ R0 — Measurement foundation *(the gate — benchmark-first)*
 **Goal:** a corpus where current retrieval **measurably fails**, so any lift is provable.
 **Decision (ADR-0007):** benchmark-first. Stand up a public IR benchmark tier (SciFact/BEIR subset)
 — reproducible, statistically powered, CI-gateable, no private data — where the bi-encoder genuinely
 fails. The real-data tier (faithful, from dogfooding) matures in parallel via **P1**.
 **Exit:** the benchmark eval shows vector failing in ≥1 category; a benchmark gate runs in CI.
-**Status:** ⬜ next slice → brainstorm design.
+**Status:** ✅ Done. SciFact tier implemented: `raki-eval/src/benchmark.rs` (BEIR loader + aggregate IR
+scorer), `bench` binary (`--write` gated), `#[ignore] benchmark_gate` (vector floor + reranker
+plausibility). Spec: `docs/superpowers/specs/2026-06-08-r0-scifact-benchmark-tier-design.md`.
+Plan: `docs/superpowers/plans/2026-06-08-r0-scifact-benchmark-tier.md`. Full baseline pending
+`cargo run -p raki-eval --bin bench -- --write`.
 
-### 🔒 R1 — Reranker decision *(precision lever)* — blocked on R0
+### ⬜ R1 — Reranker decision *(precision lever)* — unblocked by R0
 **Goal:** re-measure `reranked` vs `hybrid` on the failing corpus → **attach** the cross-encoder into
 production `search_notes` (+ `AppState` wiring) **or delete** it per the committed kill-switch
 (`docs/eval/reranker-deletion-criteria.md`: +0.03 nDCG ⇒ attach, else remove).
 **Exit:** an honest measured outcome, wired or removed; eval gate reflects it.
+**Note:** Smoke-test delta on 100-doc subset was +0.0566 nDCG@10 (directional toward attach), but
+binding verdict requires the full 5K-doc baseline + real-notes ground truth.
 
 ### 🔒 R2 — Chunk-level embeddings — blocked on R0
 **Goal:** retire whole-note embedding; chunk notes. The `buried-fact-in-long-note` category is the
