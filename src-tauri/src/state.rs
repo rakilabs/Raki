@@ -23,4 +23,8 @@ pub struct AppState {
     /// The cloud provider/model the egress decision is attributed to (display + consent key).
     pub provider: String,
     pub model: String,
+    /// Number of top search results to retrieve for QA assembly.
+    pub k: usize,
+    /// Token budget for assembled context.
+    pub budget_tokens: usize,
 }

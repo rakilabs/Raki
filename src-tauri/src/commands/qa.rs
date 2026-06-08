@@ -2,19 +2,15 @@
 
 use tauri::State;
 
-use raki_domain::{EgressDenied, EgressError, Mode, NoteId};
-use raki_generate::{answer_question as run_answer, preview, GenerateDeps, GenerateError};
+use raki_domain::{EgressError, Mode};
+use raki_generate::{assemble_for, send_answer, GenerateError};
 
 use crate::dto::{AnswerOutcome, CitedNote, EgressPreviewDto};
 use crate::error::AppError;
 use crate::state::AppState;
 
-// ---- block A: shared helpers ----
-const K: usize = 10;
-const BUDGET_TOKENS: usize = 2000;
-
-fn deps(state: &AppState) -> GenerateDeps<'_> {
-    GenerateDeps {
+fn deps(state: &AppState) -> raki_generate::GenerateDeps<'_> {
+    raki_generate::GenerateDeps {
         keyword: state.keyword.as_ref(),
         vectors: state.vectors.as_ref(),
         embedder: state.embedder.as_ref(),
@@ -22,56 +18,43 @@ fn deps(state: &AppState) -> GenerateDeps<'_> {
         gate: state.gate.as_ref(),
         provider: &state.provider,
         model: &state.model,
-        budget: BUDGET_TOKENS,
-        k: K,
+        budget: state.budget_tokens,
+        k: state.k,
     }
 }
 
-/// A `Denied(LocalOnlyMode | ConsentRequired)` is NOT an error — it means "ask the user first".
-/// Sync: a match guard cannot `.await`.
-fn needs_consent(e: &GenerateError) -> bool {
-    matches!(
-        e,
-        GenerateError::Egress(EgressError::Denied(
-            EgressDenied::LocalOnlyMode | EgressDenied::ConsentRequired
-        ))
-    )
-}
-
-fn into_app_error(e: GenerateError) -> AppError {
-    match e {
-        GenerateError::Domain(d) => AppError::from(d),
-        GenerateError::Egress(EgressError::Completion(d)) => AppError::from(d),
-        GenerateError::Egress(EgressError::Audit(m)) => AppError {
-            kind: "audit".into(),
-            message: m,
-        },
-        GenerateError::Egress(EgressError::Denied(d)) => AppError {
-            kind: "denied".into(),
-            message: d.to_string(),
-        },
-    }
-}
-
-// ---- block B: the answer command ----
 #[tauri::command]
 pub async fn answer_question(
     state: State<'_, AppState>,
     query: String,
 ) -> Result<AnswerOutcome, AppError> {
-    match run_answer(&query, &deps(state.inner())).await {
+    let d = deps(state.inner());
+
+    let Some((ctx, titles)) = assemble_for(&query, &d).await? else {
+        return Ok(AnswerOutcome::Answer {
+            state: "nothing_matched".into(),
+            text: "No relevant notes found.".into(),
+            cited: vec![],
+        });
+    };
+
+    // Build the preview now — we'll need it if the gate denies.
+    let preview = EgressPreviewDto {
+        provider: d.provider.to_string(),
+        summary: ctx.egress.summary(),
+        source_titles: ctx
+            .egress
+            .source_ids
+            .iter()
+            .map(|s| titles.get(&s.0).cloned().unwrap_or_else(|| s.0.clone()))
+            .collect(),
+    };
+
+    match send_answer(&ctx, &query, &d).await {
         Ok(ans) => {
             let mut cited = Vec::with_capacity(ans.cited_ids.len());
             for sid in &ans.cited_ids {
-                let title = match NoteId::parse(&sid.0) {
-                    Ok(nid) => state
-                        .notes
-                        .get(&nid)
-                        .await?
-                        .map(|n| n.title)
-                        .unwrap_or_else(|| sid.0.clone()),
-                    Err(_) => sid.0.clone(),
-                };
+                let title = titles.get(&sid.0).cloned().unwrap_or_else(|| sid.0.clone());
                 cited.push(CitedNote {
                     id: sid.0.clone(),
                     title,
@@ -83,29 +66,13 @@ pub async fn answer_question(
                 cited,
             })
         }
-        Err(e) if needs_consent(&e) => {
-            // Re-run retrieve+assemble locally (no send) to show what WOULD leave.
-            match preview(&query, &deps(state.inner())).await {
-                Ok(Some(p)) => Ok(AnswerOutcome::NeedsConsent {
-                    preview: EgressPreviewDto {
-                        provider: p.provider,
-                        summary: p.summary,
-                        source_titles: p.source_titles,
-                    },
-                }),
-                Ok(None) => Ok(AnswerOutcome::Answer {
-                    state: "nothing_matched".into(),
-                    text: "No relevant notes found.".into(),
-                    cited: vec![],
-                }),
-                Err(pe) => Err(into_app_error(pe)),
-            }
-        }
-        Err(e) => Err(into_app_error(e)),
+        Err(GenerateError::Egress(EgressError::Denied(
+            raki_domain::EgressDenied::LocalOnlyMode | raki_domain::EgressDenied::ConsentRequired,
+        ))) => Ok(AnswerOutcome::NeedsConsent { preview }),
+        Err(e) => Err(AppError::from(e)),
     }
 }
 
-// ---- block C: consent mutation commands ----
 #[tauri::command]
 pub async fn grant_cloud_consent(
     state: State<'_, AppState>,

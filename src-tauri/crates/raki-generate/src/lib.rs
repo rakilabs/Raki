@@ -25,6 +25,7 @@ pub struct GenerateDeps<'a> {
 }
 
 /// The result of a QA request.
+#[derive(Debug)]
 pub struct Answer {
     pub state: AnswerState,
     pub text: String,
@@ -98,7 +99,7 @@ fn note_body_to_text(body: &str) -> String {
 
 /// Retrieve + assemble locally (no model call). Returns the assembled context and an
 /// id→title map for the included sources, or `None` when nothing matched.
-async fn assemble_for(
+pub async fn assemble_for(
     query: &str,
     deps: &GenerateDeps<'_>,
 ) -> Result<Option<(AssembledContext, std::collections::HashMap<String, String>)>, GenerateError> {
@@ -132,20 +133,14 @@ async fn assemble_for(
     Ok(Some((ctx, titles)))
 }
 
-pub async fn answer_question(
+/// Send the assembled context to the model (gated). The actual completion + groundedness check.
+pub async fn send_answer(
+    ctx: &AssembledContext,
     query: &str,
     deps: &GenerateDeps<'_>,
 ) -> Result<Answer, GenerateError> {
-    let Some((ctx, _titles)) = assemble_for(query, deps).await? else {
-        return Ok(Answer {
-            state: AnswerState::NothingMatched,
-            text: "No relevant notes found.".into(),
-            cited_ids: vec![],
-            egress_log_id: None,
-        });
-    };
     let req = CompletionRequest {
-        system: Some(build_system_prompt(&ctx)),
+        system: Some(build_system_prompt(ctx)),
         prompt: query.to_string(),
         max_tokens: None,
     };
@@ -167,6 +162,21 @@ pub async fn answer_question(
         cited_ids,
         egress_log_id: Some(log_id),
     })
+}
+
+pub async fn answer_question(
+    query: &str,
+    deps: &GenerateDeps<'_>,
+) -> Result<Answer, GenerateError> {
+    let Some((ctx, _titles)) = assemble_for(query, deps).await? else {
+        return Ok(Answer {
+            state: AnswerState::NothingMatched,
+            text: "No relevant notes found.".into(),
+            cited_ids: vec![],
+            egress_log_id: None,
+        });
+    };
+    send_answer(&ctx, query, deps).await
 }
 
 /// What a cloud send WOULD disclose — shown to the user before consent (spec D7). Metadata only.
@@ -207,8 +217,8 @@ mod flow_tests {
     use raki_ai::testing::FakeLlmProvider;
     use raki_domain::testing::FixedClock;
     use raki_domain::{
-        EgressLog, EgressLogId, EgressRecord, EgressSettings, Embedding, KeywordHit, Mode, Note,
-        NoteId, VectorHit,
+        EgressDenied, EgressLog, EgressLogId, EgressRecord, EgressSettings, Embedding, KeywordHit,
+        Mode, Note, NoteId, VectorHit,
     };
 
     // --- fakes (impl domain ports) ---
@@ -324,6 +334,66 @@ mod flow_tests {
         )
     }
 
+    fn test_deps<'a>(
+        gate: &'a GatedLlmProvider,
+        notes: &'a dyn NoteRepository,
+        vectors: &'a dyn VectorIndex,
+    ) -> GenerateDeps<'a> {
+        GenerateDeps {
+            keyword: &NoKeyword,
+            vectors,
+            embedder: &FakeEmbed,
+            notes,
+            gate,
+            provider: "kimi",
+            model: "k2",
+            budget: 10_000,
+            k: 5,
+        }
+    }
+
+    struct ToggleSettings {
+        mode: Mutex<Mode>,
+        consented: Mutex<HashSet<String>>,
+    }
+    impl Default for ToggleSettings {
+        fn default() -> Self {
+            Self {
+                mode: Mutex::new(Mode::LocalOnly),
+                consented: Mutex::new(HashSet::new()),
+            }
+        }
+    }
+    #[async_trait]
+    impl EgressSettings for ToggleSettings {
+        async fn mode(&self) -> Result<Mode, DomainError> {
+            Ok(*self.mode.lock().unwrap())
+        }
+        async fn consented(&self) -> Result<HashSet<String>, DomainError> {
+            Ok(self.consented.lock().unwrap().clone())
+        }
+        async fn set_mode(&self, m: Mode) -> Result<(), DomainError> {
+            *self.mode.lock().unwrap() = m;
+            Ok(())
+        }
+        async fn grant(&self, p: &str) -> Result<(), DomainError> {
+            self.consented.lock().unwrap().insert(p.to_string());
+            Ok(())
+        }
+        async fn revoke(&self, p: &str) -> Result<(), DomainError> {
+            self.consented.lock().unwrap().remove(p);
+            Ok(())
+        }
+    }
+
+    fn toggle_gate(
+        inner: Arc<dyn raki_domain::LlmProvider>,
+        settings: Arc<ToggleSettings>,
+        log: Arc<SpyLog>,
+    ) -> GatedLlmProvider {
+        GatedLlmProvider::new(inner, settings, log, Arc::new(FixedClock(1000)))
+    }
+
     #[tokio::test]
     async fn grounded_answer_sets_grounded_true() {
         let nid = NoteId::new();
@@ -332,17 +402,9 @@ mod flow_tests {
         let fake = Arc::new(FakeLlmProvider::ok(&reply));
         let log = Arc::new(SpyLog::default());
         let g = gate(fake, log.clone());
-        let deps = GenerateDeps {
-            keyword: &NoKeyword,
-            vectors: &OneVector(nid.to_string()),
-            embedder: &FakeEmbed,
-            notes: &OneNote(nid),
-            gate: &g,
-            provider: "kimi",
-            model: "k2",
-            budget: 10_000,
-            k: 5,
-        };
+        let note = OneNote(nid);
+        let vec = OneVector(nid.to_string());
+        let deps = test_deps(&g, &note, &vec);
         let ans = answer_question("how do I pay at the inn?", &deps)
             .await
             .unwrap();
@@ -359,17 +421,8 @@ mod flow_tests {
         let fake = Arc::new(FakeLlmProvider::ok("unused"));
         let log = Arc::new(SpyLog::default());
         let g = gate(fake.clone(), log.clone());
-        let deps = GenerateDeps {
-            keyword: &NoKeyword,
-            vectors: &OneVector(nid.to_string()),
-            embedder: &FakeEmbed,
-            notes: &EmptyRepo, // id retrieved but note missing → 0 candidates
-            gate: &g,
-            provider: "kimi",
-            model: "k2",
-            budget: 10_000,
-            k: 5,
-        };
+        let vec = OneVector(nid.to_string());
+        let deps = test_deps(&g, &EmptyRepo, &vec);
         let ans = answer_question("anything", &deps).await.unwrap();
         assert_eq!(ans.state, AnswerState::NothingMatched);
         assert!(ans.egress_log_id.is_none());
@@ -387,17 +440,9 @@ mod flow_tests {
         ));
         let log = Arc::new(SpyLog::default());
         let g = gate(fake.clone(), log.clone());
-        let deps = GenerateDeps {
-            keyword: &NoKeyword,
-            vectors: &OneVector(nid.to_string()),
-            embedder: &FakeEmbed,
-            notes: &OneNote(nid),
-            gate: &g,
-            provider: "kimi",
-            model: "k2",
-            budget: 10_000,
-            k: 5,
-        };
+        let note = OneNote(nid);
+        let vec = OneVector(nid.to_string());
+        let deps = test_deps(&g, &note, &vec);
         let ans = answer_question("why is the sky blue?", &deps)
             .await
             .unwrap();
@@ -439,17 +484,9 @@ mod flow_tests {
         let fake = Arc::new(FakeLlmProvider::ok("unused"));
         let log = Arc::new(SpyLog::default());
         let g = gate(fake.clone(), log.clone());
-        let deps = GenerateDeps {
-            keyword: &NoKeyword,
-            vectors: &OneVector(nid.to_string()),
-            embedder: &FakeEmbed,
-            notes: &OneNote(nid),
-            gate: &g,
-            provider: "kimi",
-            model: "k2",
-            budget: 10_000,
-            k: 5,
-        };
+        let note = OneNote(nid);
+        let vec = OneVector(nid.to_string());
+        let deps = test_deps(&g, &note, &vec);
         let p = preview("how do I pay?", &deps)
             .await
             .unwrap()
@@ -466,17 +503,48 @@ mod flow_tests {
         let fake = Arc::new(FakeLlmProvider::ok("unused"));
         let log = Arc::new(SpyLog::default());
         let g = gate(fake, log);
-        let deps = GenerateDeps {
-            keyword: &NoKeyword,
-            vectors: &OneVector(nid.to_string()),
-            embedder: &FakeEmbed,
-            notes: &EmptyRepo,
-            gate: &g,
-            provider: "kimi",
-            model: "k2",
-            budget: 10_000,
-            k: 5,
-        };
+        let vec = OneVector(nid.to_string());
+        let deps = test_deps(&g, &EmptyRepo, &vec);
         assert!(preview("x", &deps).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn send_answer_succeeds_after_consent_is_granted() {
+        let nid = NoteId::new();
+        let reply = r#"{"answer":"Pay cash.","cited_source_ids":["IDPLACEHOLDER"],"insufficient_context":false}"#
+            .replace("IDPLACEHOLDER", &nid.to_string());
+        let fake = Arc::new(FakeLlmProvider::ok(&reply));
+        let log = Arc::new(SpyLog::default());
+        let settings = Arc::new(ToggleSettings::default());
+        // Start in LocalOnly mode → gate denies.
+        *settings.mode.lock().unwrap() = Mode::LocalOnly;
+        let g = toggle_gate(fake.clone(), settings.clone(), log.clone());
+        let note = OneNote(nid);
+        let vec = OneVector(nid.to_string());
+        let deps = test_deps(&g, &note, &vec);
+
+        let Some((ctx, _titles)) = assemble_for("how do I pay?", &deps).await.unwrap() else {
+            panic!("expected some context");
+        };
+
+        // First send: denied because LocalOnly.
+        let err = send_answer(&ctx, "how do I pay?", &deps).await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                GenerateError::Egress(EgressError::Denied(EgressDenied::LocalOnlyMode))
+            ),
+            "expected LocalOnlyMode denial, got {err:?}"
+        );
+        assert_eq!(fake.call_count(), 0, "no send while denied");
+
+        // Grant consent.
+        settings.set_mode(Mode::CloudAllowed).await.unwrap();
+        settings.grant("kimi").await.unwrap();
+
+        // Second send: succeeds now.
+        let ans = send_answer(&ctx, "how do I pay?", &deps).await.unwrap();
+        assert_eq!(ans.state, AnswerState::Grounded);
+        assert_eq!(fake.call_count(), 1, "send after consent");
     }
 }

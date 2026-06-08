@@ -7,21 +7,35 @@ function errMessage(e: unknown): string {
   return typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e);
 }
 
+function isNeedsConsent(o: AnswerOutcome): o is Extract<AnswerOutcome, { kind: "needs_consent" }> {
+  return o.kind === "needs_consent";
+}
+
 export function AskBox() {
   const [question, setQuestion] = createSignal("");
   const [outcome, setOutcome] = createSignal<AnswerOutcome | null>(null);
   const [pending, setPending] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [lastReqId, setLastReqId] = createSignal(0);
 
   async function run(fn: () => Promise<AnswerOutcome>) {
+    const reqId = lastReqId() + 1;
+    setLastReqId(reqId);
     setPending(true);
     setError(null);
     try {
-      setOutcome(await fn());
+      const result = await fn();
+      if (lastReqId() === reqId) {
+        setOutcome(result);
+      }
     } catch (e) {
-      setError(errMessage(e));
+      if (lastReqId() === reqId) {
+        setError(errMessage(e));
+      }
     } finally {
-      setPending(false);
+      if (lastReqId() === reqId) {
+        setPending(false);
+      }
     }
   }
 
@@ -35,6 +49,34 @@ export function AskBox() {
       await qaApi.grant(PROVIDER); // grant consent + flip to CloudAllowed, then re-ask
       return qaApi.ask(question().trim());
     });
+
+  function renderOutcome(o: AnswerOutcome) {
+    if (isNeedsConsent(o)) {
+      return (
+        <div>
+          <p>This will send to the cloud: <strong>{o.preview.summary}</strong></p>
+          <ul>
+            <For each={o.preview.source_titles}>{(t) => <li>{t}</li>}</For>
+          </ul>
+          <button type="button" disabled={pending()} onClick={confirmSend}>Send to cloud</button>
+          <button type="button" onClick={() => setOutcome(null)}>Stay local</button>
+        </div>
+      );
+    }
+    return (
+      <div>
+        <p>{o.text}</p>
+        <Show when={o.cited.length > 0}>
+          <p>Sources:</p>
+          <ul>
+            <For each={o.cited}>
+              {(c) => <li>{c.title}</li>}
+            </For>
+          </ul>
+        </Show>
+      </div>
+    );
+  }
 
   return (
     <section aria-label="Ask AI (experimental)">
@@ -50,36 +92,8 @@ export function AskBox() {
 
       <Show when={error()}>{(msg) => <p role="alert">Error: {msg()}</p>}</Show>
 
-      <Show when={outcome()}>
-        {(o) => (
-          <Show
-            when={o().kind === "needs_consent" ? (o() as Extract<AnswerOutcome, { kind: "needs_consent" }>) : null}
-            fallback={
-              <div>
-                <p>{(o() as Extract<AnswerOutcome, { kind: "answer" }>).text}</p>
-                <Show when={(o() as Extract<AnswerOutcome, { kind: "answer" }>).cited.length > 0}>
-                  <p>Sources:</p>
-                  <ul>
-                    <For each={(o() as Extract<AnswerOutcome, { kind: "answer" }>).cited}>
-                      {(c) => <li>{c.title}</li>}
-                    </For>
-                  </ul>
-                </Show>
-              </div>
-            }
-          >
-            {(nc) => (
-              <div>
-                <p>This will send to the cloud: <strong>{nc().preview.summary}</strong></p>
-                <ul>
-                  <For each={nc().preview.source_titles}>{(t) => <li>{t}</li>}</For>
-                </ul>
-                <button type="button" disabled={pending()} onClick={confirmSend}>Send to cloud</button>
-                <button type="button" onClick={() => setOutcome(null)}>Stay local</button>
-              </div>
-            )}
-          </Show>
-        )}
+      <Show when={outcome()} keyed>
+        {(o) => renderOutcome(o)}
       </Show>
     </section>
   );

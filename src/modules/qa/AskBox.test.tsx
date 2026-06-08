@@ -9,7 +9,12 @@ import { AskBox } from "./AskBox";
 const mocked = vi.mocked(qaApi);
 
 describe("AskBox", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocked.ask.mockReset();
+    mocked.grant.mockReset();
+    mocked.revoke.mockReset();
+  });
 
   it("asking renders a consent preview without sending", async () => {
     mocked.ask.mockResolvedValue({
@@ -37,8 +42,9 @@ describe("AskBox", () => {
     fireEvent.submit(screen.getByRole("button", { name: "Ask" }).closest("form")!);
     await waitFor(() => screen.getByRole("button", { name: "Send to cloud" }));
     fireEvent.click(screen.getByRole("button", { name: "Send to cloud" }));
+    await waitFor(() => expect(mocked.grant).toHaveBeenCalledWith("kimi"));
+    expect(mocked.ask).toHaveBeenCalledTimes(2);
     await waitFor(() => screen.getByText("Pay cash."));
-    expect(mocked.grant).toHaveBeenCalledWith("kimi");
   });
 
   it("renders an error alert when ask rejects", async () => {

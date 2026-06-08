@@ -121,6 +121,8 @@ pub fn run() {
                 settings,
                 provider,
                 model,
+                k: 10,
+                budget_tokens: 2000,
             });
             Ok(())
         })
