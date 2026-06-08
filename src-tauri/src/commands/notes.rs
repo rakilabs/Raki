@@ -2,18 +2,47 @@
 
 use tauri::State;
 
-use raki_domain::{Note, NoteId};
+use raki_domain::{text_to_body, Note, NoteId};
 
-use crate::dto::{CreateNoteInput, NoteDto};
+use crate::dto::{CreateNoteInput, NoteDto, UpdateNoteInput};
 use crate::error::AppError;
 use crate::state::AppState;
+
+const MAX_TITLE_CHARS: usize = 512;
+const MAX_BODY_BYTES: usize = 256 * 1024;
+
+/// Boundary validation shared by create + update (review M1). Returns the trimmed title
+/// so callers share a single source of truth for sanitization.
+fn validate(title: &str, body: &str) -> Result<String, AppError> {
+    let t = title.trim();
+    if t.is_empty() {
+        return Err(AppError {
+            kind: "validation_error".into(),
+            message: "title must not be empty".into(),
+        });
+    }
+    if t.chars().count() > MAX_TITLE_CHARS {
+        return Err(AppError {
+            kind: "validation_error".into(),
+            message: "title too long".into(),
+        });
+    }
+    if body.len() > MAX_BODY_BYTES {
+        return Err(AppError {
+            kind: "validation_error".into(),
+            message: "body too long".into(),
+        });
+    }
+    Ok(t.to_string())
+}
 
 #[tauri::command]
 pub async fn create_note(
     state: State<'_, AppState>,
     input: CreateNoteInput,
 ) -> Result<NoteDto, AppError> {
-    let note = Note::new(input.title, input.body, state.clock.now_ms());
+    let title = validate(&input.title, &input.body)?;
+    let note = Note::new(title, text_to_body(&input.body), state.clock.now_ms());
     state.notes.upsert(&note).await?;
     state.index.trigger(); // embed the new note in the background (single-flight)
     Ok(NoteDto::from(note))
@@ -54,4 +83,27 @@ pub async fn search_notes(
         }
     }
     Ok(out)
+}
+
+#[tauri::command]
+pub async fn update_note(
+    state: State<'_, AppState>,
+    input: UpdateNoteInput,
+) -> Result<NoteDto, AppError> {
+    let title = validate(&input.title, &input.body)?;
+    let nid = NoteId::parse(&input.id)?;
+    let existing = state.notes.get(&nid).await?.ok_or_else(|| AppError {
+        kind: "not_found".into(),
+        message: "note not found".into(),
+    })?;
+    let edited = existing.edit(title, text_to_body(&input.body), state.clock.now_ms());
+    // Atomic guarded update: false ⇒ the row was deleted between read and write — do not resurrect.
+    if !state.notes.update(&edited).await? {
+        return Err(AppError {
+            kind: "not_found".into(),
+            message: "note not found".into(),
+        });
+    }
+    state.index.trigger();
+    Ok(NoteDto::from(edited))
 }

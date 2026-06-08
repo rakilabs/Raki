@@ -20,6 +20,10 @@ pub struct Embedding(pub Vec<f32>);
 #[async_trait]
 pub trait NoteRepository: Send + Sync {
     async fn upsert(&self, note: &Note) -> Result<(), DomainError>;
+    /// Update an existing **live** note in place. Returns `false` when no live row matched
+    /// (missing or soft-deleted) — the caller treats that as not-found and never resurrects.
+    /// Distinct from `upsert`, which deliberately creates/resurrects.
+    async fn update(&self, note: &Note) -> Result<bool, DomainError>;
     async fn get(&self, id: &NoteId) -> Result<Option<Note>, DomainError>;
     async fn list(&self) -> Result<Vec<Note>, DomainError>;
     async fn soft_delete(&self, id: &NoteId, at_ms: i64) -> Result<(), DomainError>;

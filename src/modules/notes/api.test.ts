@@ -5,6 +5,7 @@ vi.mock("~/shared/ipc", () => ({
     searchNotes: vi.fn(),
     listNotes: vi.fn(),
     createNote: vi.fn(),
+    updateNote: vi.fn(),
   },
 }));
 
@@ -22,5 +23,11 @@ describe("notesApi", () => {
     mocked.searchNotes.mockResolvedValue([]);
     await notesApi.search("apples");
     expect(mocked.searchNotes).toHaveBeenCalledWith("apples");
+  });
+
+  it("update delegates to the updateNote command with the input", async () => {
+    mocked.updateNote.mockResolvedValue({ id: "n1", title: "t", body: "b", created_at: 0, updated_at: 1 });
+    await notesApi.update({ id: "n1", title: "t", body: "b" });
+    expect(mocked.updateNote).toHaveBeenCalledWith({ id: "n1", title: "t", body: "b" });
   });
 });

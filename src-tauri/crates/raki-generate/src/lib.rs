@@ -7,8 +7,8 @@ pub use groundedness::AnswerState;
 
 use raki_ai::GatedLlmProvider;
 use raki_domain::{
-    DomainError, EgressError, EmbeddingProvider, KeywordIndex, NoteRepository, SourceId,
-    VectorIndex,
+    body_to_text, DomainError, EgressError, EmbeddingProvider, KeywordIndex, NoteRepository,
+    SourceId, VectorIndex,
 };
 
 /// Everything `answer_question` needs, injected so the flow is fake-testable.
@@ -60,43 +60,6 @@ fn build_system_prompt(ctx: &AssembledContext) -> String {
     s
 }
 
-/// Best-effort plain text from a note body. If `body` is ProseMirror JSON, extract text
-/// nodes recursively; otherwise pass through unchanged (plain text or legacy format).
-fn note_body_to_text(body: &str) -> String {
-    fn extract_text(value: &serde_json::Value, out: &mut String) {
-        match value {
-            serde_json::Value::Object(map) => {
-                if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
-                    if !out.is_empty() {
-                        out.push(' ');
-                    }
-                    out.push_str(text);
-                }
-                if let Some(content) = map.get("content").and_then(|v| v.as_array()) {
-                    for child in content {
-                        extract_text(child, out);
-                    }
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for child in arr {
-                    extract_text(child, out);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    match serde_json::from_str::<serde_json::Value>(body) {
-        Ok(v) if v.get("type").and_then(|t| t.as_str()) == Some("doc") => {
-            let mut out = String::new();
-            extract_text(&v, &mut out);
-            out
-        }
-        _ => body.to_string(),
-    }
-}
-
 /// Retrieve + assemble locally (no model call). Returns the assembled context and an
 /// id→title map for the included sources, or `None` when nothing matched.
 pub async fn assemble_for(
@@ -121,7 +84,7 @@ pub async fn assemble_for(
             titles.insert(id.clone(), note.title.clone());
             candidates.push(Candidate {
                 source_id: id.clone(),
-                text: format!("{}\n{}", note.title, note_body_to_text(&note.body)),
+                text: format!("{}\n{}", note.title, body_to_text(&note.body)),
                 score: (ids.len() - rank) as f64,
             });
         }
@@ -264,6 +227,9 @@ mod flow_tests {
         async fn upsert(&self, _: &Note) -> Result<(), DomainError> {
             Ok(())
         }
+        async fn update(&self, _: &Note) -> Result<bool, DomainError> {
+            Ok(true)
+        }
         async fn get(&self, id: &NoteId) -> Result<Option<Note>, DomainError> {
             Ok((*id == self.0)
                 .then(|| Note::new("Trip".into(), "Pay cash at the ryokan.".into(), 0)))
@@ -280,6 +246,9 @@ mod flow_tests {
     impl NoteRepository for EmptyRepo {
         async fn upsert(&self, _: &Note) -> Result<(), DomainError> {
             Ok(())
+        }
+        async fn update(&self, _: &Note) -> Result<bool, DomainError> {
+            Ok(true)
         }
         async fn get(&self, _: &NoteId) -> Result<Option<Note>, DomainError> {
             Ok(None)
@@ -453,28 +422,6 @@ mod flow_tests {
         assert!(
             !grounded[0].1,
             "set_grounded(false) persisted for the sent-but-ungrounded answer"
-        );
-    }
-
-    #[test]
-    fn prosemirror_body_is_flattened_to_text() {
-        let doc = r#"{"type":"doc","content":[
-            {"type":"paragraph","content":[{"type":"text","text":"Pay cash"},{"type":"text","text":" at the ryokan."}]},
-            {"type":"paragraph","content":[{"type":"text","text":"Checkout is 10am."}]}
-        ]}"#;
-        assert_eq!(
-            note_body_to_text(doc),
-            "Pay cash  at the ryokan. Checkout is 10am."
-        );
-    }
-
-    #[test]
-    fn plain_text_body_passes_through_unchanged() {
-        // Not a ProseMirror doc (no type:"doc") → returned verbatim.
-        assert_eq!(note_body_to_text("just plain text"), "just plain text");
-        assert_eq!(
-            note_body_to_text(r#"{"type":"other"}"#),
-            r#"{"type":"other"}"#
         );
     }
 

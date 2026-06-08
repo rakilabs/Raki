@@ -54,6 +54,15 @@ const MIGRATIONS: &[&str] = &[
     ) STRICT;",
     // V5: groundedness verdict for a QA answer. Nullable: NULL = not a QA answer / no send.
     "ALTER TABLE egress_log ADD COLUMN grounded INTEGER;",
+    // V6: the body flattener changed (space-join → newline-join, and "{}" → empty), so the
+    // text we embed changed for every note while content_hash (over raw body) did not.
+    // Clear the staleness stamp to force a clean re-embed of the whole corpus on next start.
+    // Also rebuild notes_fts so pre-existing notes are indexed with the new flattened text.
+    "UPDATE notes SET embedded_hash = NULL;
+     DELETE FROM notes_fts WHERE note_id IN (SELECT id FROM notes WHERE deleted_at IS NULL);
+     INSERT INTO notes_fts (note_id, title, body)
+         SELECT id, title, CASE WHEN body = '{}' THEN '' ELSE body END
+         FROM notes WHERE deleted_at IS NULL;",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
@@ -133,6 +142,47 @@ mod tests {
             )
             .unwrap();
         assert_eq!(post, Some(0));
+    }
+
+    #[test]
+    fn v6_re_embed_clears_embedded_hash_on_populated_notes() {
+        use crate::db::register_sqlite_vec;
+        use rusqlite::Connection;
+
+        register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        // Apply V1..V5, then stamp so migrate() resumes at V6.
+        for sql in &MIGRATIONS[0..5] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 5i64).unwrap();
+        // A note that was already embedded (embedded_hash set) BEFORE the migration.
+        conn.execute(
+            "INSERT INTO notes (id, title, body, created_at, updated_at, deleted_at, version, content_hash, embedded_hash, embedded_model)
+             VALUES ('n1', 'T', '{}', 1, 1, NULL, 1, 'h', 'h', 'm')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap(); // applies V6
+
+        let embedded_hash: Option<String> = conn
+            .query_row("SELECT embedded_hash FROM notes WHERE id = 'n1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            embedded_hash, None,
+            "V6 clears the staleness stamp → note re-lists as pending"
+        );
+
+        // V6 also rebuilds notes_fts: the '{}' body must be flattened to '' in the index.
+        let fts_body: String = conn
+            .query_row("SELECT body FROM notes_fts WHERE note_id = 'n1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(fts_body, "");
     }
 
     #[test]

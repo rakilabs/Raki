@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use rusqlite::params;
 
-use raki_domain::{DomainError, Note, NoteId, NoteRepository};
+use raki_domain::{body_to_text, DomainError, Note, NoteId, NoteRepository};
 
 use crate::db::Database;
 use crate::hash::content_hash;
@@ -59,7 +59,7 @@ impl NoteRepository for SqliteNoteRepository {
                 if n.deleted_at.is_none() {
                     tx.execute(
                         "INSERT INTO notes_fts (note_id, title, body) VALUES (?1, ?2, ?3)",
-                        params![id, n.title, n.body],
+                        params![id, n.title, body_to_text(&n.body)],
                     )?;
                 }
                 tx.commit()?;
@@ -93,6 +93,36 @@ impl NoteRepository for SqliteNoteRepository {
                     .query_map([], row_to_note)?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 Ok(notes)
+            })
+            .await
+    }
+
+    async fn update(&self, note: &Note) -> Result<bool, DomainError> {
+        let n = note.clone();
+        self.db
+            .call(move |c| {
+                let id = n.id.to_string();
+                let hash = content_hash(&n.title, &n.body);
+                let tx = c.unchecked_transaction()?;
+                // Liveness guard: only a non-deleted row updates. A soft-deleted (or missing)
+                // row matches nothing → 0 changes → false, so an edit can never resurrect.
+                let affected = tx.execute(
+                    "UPDATE notes
+                        SET title = ?2, body = ?3, updated_at = ?4, version = ?5, content_hash = ?6
+                      WHERE id = ?1 AND deleted_at IS NULL",
+                    params![id, n.title, n.body, n.updated_at, n.version, hash],
+                )?;
+                if affected == 0 {
+                    return Ok(false); // tx drops → rollback; nothing changed
+                }
+                // FTS5 has no UPDATE; refresh by delete+insert with flattened body.
+                tx.execute("DELETE FROM notes_fts WHERE note_id = ?1", params![id])?;
+                tx.execute(
+                    "INSERT INTO notes_fts (note_id, title, body) VALUES (?1, ?2, ?3)",
+                    params![id, n.title, body_to_text(&n.body)],
+                )?;
+                tx.commit()?;
+                Ok(true)
             })
             .await
     }
@@ -140,6 +170,46 @@ mod tests {
             deleted_at: None,
             version: 1,
         }
+    }
+
+    #[tokio::test]
+    async fn update_changes_a_live_note_and_refreshes_fts() {
+        use raki_domain::text_to_body;
+        let db = Database::open_in_memory().unwrap();
+        let repo = SqliteNoteRepository::new(db.clone());
+        let note = Note::new("Trip".into(), text_to_body("old"), 1000);
+        repo.upsert(&note).await.unwrap();
+
+        let edited = note.edit("Trip".into(), text_to_body("new plan cash"), 2000);
+        assert!(repo.update(&edited).await.unwrap(), "live row updated");
+
+        let got = repo.get(&note.id).await.unwrap().unwrap();
+        assert_eq!(got.body, text_to_body("new plan cash"));
+        assert_eq!(got.version, 2);
+        assert_eq!(
+            fts_count(&db, &note.id.to_string()).await,
+            1,
+            "still indexed"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_refuses_to_resurrect_a_soft_deleted_note() {
+        use raki_domain::text_to_body;
+        let db = Database::open_in_memory().unwrap();
+        let repo = SqliteNoteRepository::new(db.clone());
+        let note = Note::new("T".into(), text_to_body("x"), 1000);
+        repo.upsert(&note).await.unwrap();
+        repo.soft_delete(&note.id, 1500).await.unwrap();
+
+        let edited = note.edit("T".into(), text_to_body("resurrected"), 2000);
+        assert!(!repo.update(&edited).await.unwrap(), "no live row → false");
+        assert!(repo.get(&note.id).await.unwrap().is_none(), "still deleted");
+        assert_eq!(
+            fts_count(&db, &note.id.to_string()).await,
+            0,
+            "not re-indexed"
+        );
     }
 
     #[tokio::test]
@@ -271,6 +341,31 @@ mod tests {
 
         repo.soft_delete(&id, 2000).await.unwrap();
         assert_eq!(vector_count(&db, &id.to_string()).await, 0);
+    }
+
+    #[tokio::test]
+    async fn fts_body_is_flattened_prose_not_json() {
+        use raki_domain::text_to_body;
+        let db = Database::open_in_memory().unwrap();
+        let repo = SqliteNoteRepository::new(db.clone());
+        let note = Note::new("Trip".into(), text_to_body("pay cash at the ryokan"), 1000);
+        repo.upsert(&note).await.unwrap();
+        let id = note.id.to_string();
+        let fts_body: String = db
+            .call(move |c| {
+                c.query_row(
+                    "SELECT body FROM notes_fts WHERE note_id = ?1",
+                    rusqlite::params![id],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(fts_body, "pay cash at the ryokan");
+        assert!(
+            !fts_body.contains("paragraph"),
+            "no structural keys in the index"
+        );
     }
 
     #[tokio::test]

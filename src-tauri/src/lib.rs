@@ -21,7 +21,7 @@ use raki_storage::{
     SqliteNoteRepository, SqliteVectorIndex,
 };
 
-use crate::commands::notes::{create_note, get_note, list_notes, search_notes};
+use crate::commands::notes::{create_note, get_note, list_notes, search_notes, update_note};
 use crate::commands::qa::{answer_question, grant_cloud_consent, revoke_cloud_consent};
 use crate::indexing::IndexingService;
 use crate::state::AppState;
@@ -131,6 +131,7 @@ pub fn run() {
             list_notes,
             get_note,
             search_notes,
+            update_note,
             answer_question,
             grant_cloud_consent,
             revoke_cloud_consent

@@ -24,7 +24,7 @@ impl From<Note> for NoteDto {
         NoteDto {
             id: n.id.to_string(),
             title: n.title,
-            body: n.body,
+            body: raki_domain::body_to_text(&n.body),
             created_at: n.created_at,
             updated_at: n.updated_at,
         }
@@ -34,6 +34,14 @@ impl From<Note> for NoteDto {
 #[derive(Debug, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/shared/ipc/bindings/")]
 pub struct CreateNoteInput {
+    pub title: String,
+    pub body: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/shared/ipc/bindings/")]
+pub struct UpdateNoteInput {
+    pub id: String,
     pub title: String,
     pub body: String,
 }

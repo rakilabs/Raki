@@ -4,7 +4,7 @@
 use async_trait::async_trait;
 use rusqlite::params;
 
-use raki_domain::{DomainError, IndexingStore, NoteId, PendingNote};
+use raki_domain::{body_to_text, DomainError, IndexingStore, NoteId, PendingNote};
 
 use crate::db::Database;
 use crate::hash::content_hash;
@@ -82,7 +82,7 @@ impl IndexingStore for SqliteIndexingStore {
                     .map(|(id, title, body, content_hash)| {
                         Ok(PendingNote {
                             id: note_id_from_row(&id)?,
-                            text: format!("{title}\n\n{body}"),
+                            text: format!("{title}\n\n{}", body_to_text(&body)),
                             content_hash,
                         })
                     })
