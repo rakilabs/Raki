@@ -19,6 +19,14 @@ path = "src/bin/real-eval.rs"
 name = "chunk-eval"
 path = "src/bin/chunk-eval.rs"
 
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"
+
+[[bin]]
+name = "bench-smoke"
+path = "src/bin/bench-smoke.rs"
+
 [dependencies]
 raki-domain = { workspace = true }
 raki-storage = { workspace = true }
@@ -28,3 +36,5 @@ pulldown-cmark = { version = "0.12", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+ureq = "3.3.0"
+zip = "8.6.0"
