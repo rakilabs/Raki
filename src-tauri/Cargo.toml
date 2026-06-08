@@ -32,6 +32,7 @@ raki-storage = { path = "crates/raki-storage" }
 raki-retrieval = { path = "crates/raki-retrieval" }
 raki-ai = { path = "crates/raki-ai" }
 raki-memory = { path = "crates/raki-memory" }
+raki-generate = { path = "crates/raki-generate" }
 
 # The published sqlite-vec 0.1.10-alpha.4 crate is mis-packaged: its sqlite-vec.c
 # `#include`s sqlite-vec-{diskann,ivf,ivf-kmeans,rescore}.c, but the tarball ships
@@ -56,4 +57,5 @@ raki-storage = { workspace = true }
 raki-retrieval = { workspace = true }
 raki-ai = { workspace = true }
 raki-memory = { workspace = true }
+raki-generate = { workspace = true }
 tokio = { workspace = true }

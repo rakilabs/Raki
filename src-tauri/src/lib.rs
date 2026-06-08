@@ -11,10 +11,14 @@ use std::sync::Arc;
 
 use tauri::Manager;
 
-use raki_ai::{EgressPolicy, FakeEmbeddingProvider, FastEmbedProvider};
-use raki_domain::{Clock, EmbeddingProvider, IndexingStore, VectorIndex};
+use raki_ai::{FakeEmbeddingProvider, FastEmbedProvider, GatedLlmProvider, MessagesProvider};
+use raki_domain::{
+    Clock, Completion, CompletionRequest, DomainError, EmbeddingProvider, IndexingStore,
+    LlmProvider, Locality, VectorIndex,
+};
 use raki_storage::{
-    Database, SqliteIndexingStore, SqliteKeywordIndex, SqliteNoteRepository, SqliteVectorIndex,
+    Database, SqliteEgressLog, SqliteEgressSettings, SqliteIndexingStore, SqliteKeywordIndex,
+    SqliteNoteRepository, SqliteVectorIndex,
 };
 
 use crate::commands::notes::{create_note, get_note, list_notes, search_notes};
@@ -33,6 +37,21 @@ impl Clock for SystemClock {
     }
 }
 
+/// Used when no cloud model is configured. Never sends; fails clearly if a gated call reaches it
+/// (only possible after the user grants consent, so the message is actionable).
+struct UnconfiguredProvider;
+#[async_trait::async_trait]
+impl LlmProvider for UnconfiguredProvider {
+    fn locality(&self) -> Locality {
+        Locality::Cloud
+    }
+    async fn complete(&self, _req: CompletionRequest) -> Result<Completion, DomainError> {
+        Err(DomainError::Provider(
+            "no cloud model configured (set RAKI_LLM_BASE_URL / ANTHROPIC_API_KEY / RAKI_LLM_MODEL)".into(),
+        ))
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -45,7 +64,7 @@ pub fn run() {
             let notes = Arc::new(SqliteNoteRepository::new(db.clone()));
             let keyword = Arc::new(SqliteKeywordIndex::new(db.clone()));
             let vectors: Arc<dyn VectorIndex> = Arc::new(SqliteVectorIndex::new(db.clone()));
-            let store: Arc<dyn IndexingStore> = Arc::new(SqliteIndexingStore::new(db));
+            let store: Arc<dyn IndexingStore> = Arc::new(SqliteIndexingStore::new(db.clone()));
 
             // Real embeddings if the model is available; otherwise degrade to the fake
             // so the app still runs (keyword search is unaffected). The model-id
@@ -65,14 +84,26 @@ pub fn run() {
             ));
             index.trigger(); // startup catch-up pass (backfill + drain), single-flight
 
+            let settings: Arc<dyn raki_domain::EgressSettings> =
+                Arc::new(SqliteEgressSettings::new(db.clone()));
+            let egress_log: Arc<dyn raki_domain::EgressLog> =
+                Arc::new(SqliteEgressLog::new(db.clone()));
+
+            let provider = "kimi".to_string();
+            let model = std::env::var("RAKI_LLM_MODEL").unwrap_or_else(|_| "unknown".to_string());
+            let inner: Arc<dyn LlmProvider> = match MessagesProvider::from_env() {
+                Ok(p) => Arc::new(p),
+                Err(e) => {
+                    eprintln!("cloud model unavailable ({e}); QA will error until configured");
+                    Arc::new(UnconfiguredProvider)
+                }
+            };
+            let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+            let gate = Arc::new(GatedLlmProvider::new(inner, settings.clone(), egress_log, clock.clone()));
+
             app.manage(AppState {
-                notes,
-                keyword,
-                vectors,
-                embedder,
-                clock: Arc::new(SystemClock),
-                egress: EgressPolicy::LocalOnly,
-                index,
+                notes, keyword, vectors, embedder, clock, index,
+                gate, settings, provider, model,
             });
             Ok(())
         })

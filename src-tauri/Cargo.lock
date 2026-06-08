@@ -3873,6 +3873,7 @@ dependencies = [
  "async-trait",
  "raki-ai",
  "raki-domain",
+ "raki-generate",
  "raki-memory",
  "raki-retrieval",
  "raki-storage",
