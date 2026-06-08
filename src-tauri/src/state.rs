@@ -7,7 +7,6 @@ use raki_domain::{Clock, EgressSettings, EmbeddingProvider, KeywordIndex, NoteRe
 
 use crate::indexing::IndexingService;
 
-#[allow(dead_code)]
 pub struct AppState {
     pub notes: Arc<dyn NoteRepository>,
     pub keyword: Arc<dyn KeywordIndex>,

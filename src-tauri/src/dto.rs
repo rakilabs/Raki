@@ -37,3 +37,28 @@ pub struct CreateNoteInput {
     pub title: String,
     pub body: String,
 }
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/shared/ipc/bindings/")]
+pub struct CitedNote {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/shared/ipc/bindings/")]
+pub struct EgressPreviewDto {
+    pub provider: String,
+    pub summary: String,
+    pub source_titles: Vec<String>,
+}
+
+/// Either we need consent (and show what would leave), or we have an answer.
+/// Tagged union so the frontend can pattern-match on `kind`.
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export, tag = "kind", rename_all = "snake_case", export_to = "../../src/shared/ipc/bindings/")]
+pub enum AnswerOutcome {
+    NeedsConsent { preview: EgressPreviewDto },
+    Answer { state: String, text: String, cited: Vec<CitedNote> },
+}

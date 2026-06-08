@@ -22,6 +22,7 @@ use raki_storage::{
 };
 
 use crate::commands::notes::{create_note, get_note, list_notes, search_notes};
+use crate::commands::qa::{answer_question, grant_cloud_consent, revoke_cloud_consent};
 use crate::indexing::IndexingService;
 use crate::state::AppState;
 
@@ -111,7 +112,10 @@ pub fn run() {
             create_note,
             list_notes,
             get_note,
-            search_notes
+            search_notes,
+            answer_question,
+            grant_cloud_consent,
+            revoke_cloud_consent
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
