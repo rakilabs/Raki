@@ -60,6 +60,14 @@ Phase 4+:      Calendar, habits, reading, browser capture, automation, agents.
 > **Phase-1 discipline:** build the *foundation* deeply and the *first vertical slice* (notes) end-to-end.
 > Do **not** scaffold tasks/finance/calendar modules speculatively. The architecture must *support* them;
 > it must not *contain* them yet.
+>
+> **Phase 1 is not "done" when notes merely work.** Retrieval/memory quality is the platform's core
+> differentiator; Phase 1 completes only when that quality is driven to *best* and *measured* — not just
+> functional. Every retrieval lever is gated on a corpus where today's retrieval *fails* (ADR-0005,
+> ADR-0006, ADR-0007). Breadth waits behind a genuinely strong core.
+>
+> **Sequencing lives in `docs/ROADMAP.md`** — the living, dependency-ordered tracking file. Read it at the
+> start of every slice and pick the next milestone there. This "arc" is the phases; the roadmap is the steps.
 
 ---
 
