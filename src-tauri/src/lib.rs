@@ -100,11 +100,24 @@ pub fn run() {
                 }
             };
             let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-            let gate = Arc::new(GatedLlmProvider::new(inner, settings.clone(), egress_log, clock.clone()));
+            let gate = Arc::new(GatedLlmProvider::new(
+                inner,
+                settings.clone(),
+                egress_log,
+                clock.clone(),
+            ));
 
             app.manage(AppState {
-                notes, keyword, vectors, embedder, clock, index,
-                gate, settings, provider, model,
+                notes,
+                keyword,
+                vectors,
+                embedder,
+                clock,
+                index,
+                gate,
+                settings,
+                provider,
+                model,
             });
             Ok(())
         })

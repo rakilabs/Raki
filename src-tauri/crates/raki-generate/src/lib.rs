@@ -161,7 +161,12 @@ pub async fn answer_question(
         .set_grounded(&log_id, state.is_grounded())
         .await
         .map_err(GenerateError::Domain)?;
-    Ok(Answer { state, text, cited_ids, egress_log_id: Some(log_id) })
+    Ok(Answer {
+        state,
+        text,
+        cited_ids,
+        egress_log_id: Some(log_id),
+    })
 }
 
 /// What a cloud send WOULD disclose — shown to the user before consent (spec D7). Metadata only.
@@ -435,10 +440,20 @@ mod flow_tests {
         let log = Arc::new(SpyLog::default());
         let g = gate(fake.clone(), log.clone());
         let deps = GenerateDeps {
-            keyword: &NoKeyword, vectors: &OneVector(nid.to_string()), embedder: &FakeEmbed,
-            notes: &OneNote(nid), gate: &g, provider: "kimi", model: "k2", budget: 10_000, k: 5,
+            keyword: &NoKeyword,
+            vectors: &OneVector(nid.to_string()),
+            embedder: &FakeEmbed,
+            notes: &OneNote(nid),
+            gate: &g,
+            provider: "kimi",
+            model: "k2",
+            budget: 10_000,
+            k: 5,
         };
-        let p = preview("how do I pay?", &deps).await.unwrap().expect("some preview");
+        let p = preview("how do I pay?", &deps)
+            .await
+            .unwrap()
+            .expect("some preview");
         assert_eq!(p.provider, "kimi");
         assert_eq!(p.source_titles, vec!["Trip".to_string()]);
         assert!(p.summary.contains("→ kimi/k2"));
@@ -452,8 +467,15 @@ mod flow_tests {
         let log = Arc::new(SpyLog::default());
         let g = gate(fake, log);
         let deps = GenerateDeps {
-            keyword: &NoKeyword, vectors: &OneVector(nid.to_string()), embedder: &FakeEmbed,
-            notes: &EmptyRepo, gate: &g, provider: "kimi", model: "k2", budget: 10_000, k: 5,
+            keyword: &NoKeyword,
+            vectors: &OneVector(nid.to_string()),
+            embedder: &FakeEmbed,
+            notes: &EmptyRepo,
+            gate: &g,
+            provider: "kimi",
+            model: "k2",
+            budget: 10_000,
+            k: 5,
         };
         assert!(preview("x", &deps).await.unwrap().is_none());
     }

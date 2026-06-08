@@ -57,8 +57,19 @@ pub struct EgressPreviewDto {
 /// Tagged union so the frontend can pattern-match on `kind`.
 #[derive(Debug, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-#[ts(export, tag = "kind", rename_all = "snake_case", export_to = "../../src/shared/ipc/bindings/")]
+#[ts(
+    export,
+    tag = "kind",
+    rename_all = "snake_case",
+    export_to = "../../src/shared/ipc/bindings/"
+)]
 pub enum AnswerOutcome {
-    NeedsConsent { preview: EgressPreviewDto },
-    Answer { state: String, text: String, cited: Vec<CitedNote> },
+    NeedsConsent {
+        preview: EgressPreviewDto,
+    },
+    Answer {
+        state: String,
+        text: String,
+        cited: Vec<CitedNote>,
+    },
 }

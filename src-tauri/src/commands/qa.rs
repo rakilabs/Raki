@@ -42,8 +42,14 @@ fn into_app_error(e: GenerateError) -> AppError {
     match e {
         GenerateError::Domain(d) => AppError::from(d),
         GenerateError::Egress(EgressError::Completion(d)) => AppError::from(d),
-        GenerateError::Egress(EgressError::Audit(m)) => AppError { kind: "audit".into(), message: m },
-        GenerateError::Egress(EgressError::Denied(d)) => AppError { kind: "denied".into(), message: d.to_string() },
+        GenerateError::Egress(EgressError::Audit(m)) => AppError {
+            kind: "audit".into(),
+            message: m,
+        },
+        GenerateError::Egress(EgressError::Denied(d)) => AppError {
+            kind: "denied".into(),
+            message: d.to_string(),
+        },
     }
 }
 
@@ -58,12 +64,24 @@ pub async fn answer_question(
             let mut cited = Vec::with_capacity(ans.cited_ids.len());
             for sid in &ans.cited_ids {
                 let title = match NoteId::parse(&sid.0) {
-                    Ok(nid) => state.notes.get(&nid).await?.map(|n| n.title).unwrap_or_else(|| sid.0.clone()),
+                    Ok(nid) => state
+                        .notes
+                        .get(&nid)
+                        .await?
+                        .map(|n| n.title)
+                        .unwrap_or_else(|| sid.0.clone()),
                     Err(_) => sid.0.clone(),
                 };
-                cited.push(CitedNote { id: sid.0.clone(), title });
+                cited.push(CitedNote {
+                    id: sid.0.clone(),
+                    title,
+                });
             }
-            Ok(AnswerOutcome::Answer { state: ans.state.name().to_string(), text: ans.text, cited })
+            Ok(AnswerOutcome::Answer {
+                state: ans.state.name().to_string(),
+                text: ans.text,
+                cited,
+            })
         }
         Err(e) if needs_consent(&e) => {
             // Re-run retrieve+assemble locally (no send) to show what WOULD leave.
@@ -89,7 +107,10 @@ pub async fn answer_question(
 
 // ---- block C: consent mutation commands ----
 #[tauri::command]
-pub async fn grant_cloud_consent(state: State<'_, AppState>, provider: String) -> Result<(), AppError> {
+pub async fn grant_cloud_consent(
+    state: State<'_, AppState>,
+    provider: String,
+) -> Result<(), AppError> {
     state.settings.set_mode(Mode::CloudAllowed).await?;
     state.settings.grant(&provider).await?;
     Ok(())
@@ -99,7 +120,10 @@ pub async fn grant_cloud_consent(state: State<'_, AppState>, provider: String) -
 /// `CloudAllowed` mode AND a provider-specific grant, so an empty consent set denies all sends
 /// even though mode stays `CloudAllowed` (review #6).
 #[tauri::command]
-pub async fn revoke_cloud_consent(state: State<'_, AppState>, provider: String) -> Result<(), AppError> {
+pub async fn revoke_cloud_consent(
+    state: State<'_, AppState>,
+    provider: String,
+) -> Result<(), AppError> {
     state.settings.revoke(&provider).await?;
     Ok(())
 }
