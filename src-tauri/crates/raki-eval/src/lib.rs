@@ -6,9 +6,11 @@ use std::collections::HashMap;
 
 pub mod benchmark;
 pub mod chunk;
+pub mod chunk_baseline;
 pub mod local_corpus;
 pub mod markdown;
 pub mod realmetrics;
+pub use chunk_baseline::render_chunking_baseline;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
