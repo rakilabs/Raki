@@ -82,12 +82,41 @@ impl NoteRepository for SqliteNoteRepository {
             .await
     }
 
+    async fn get_any(&self, id: &NoteId) -> Result<Option<Note>, DomainError> {
+        let id_str = id.to_string();
+        self.db
+            .call(move |c| {
+                let mut stmt = c.prepare_cached(
+                    "SELECT id, title, body, created_at, updated_at, deleted_at, version
+                     FROM notes WHERE id = ?1",
+                )?;
+                let mut rows = stmt.query(params![id_str])?;
+                rows.next()?.map(row_to_note).transpose()
+            })
+            .await
+    }
+
     async fn list(&self) -> Result<Vec<Note>, DomainError> {
         self.db
             .call(|c| {
                 let mut stmt = c.prepare_cached(
                     "SELECT id, title, body, created_at, updated_at, deleted_at, version
                      FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC",
+                )?;
+                let notes = stmt
+                    .query_map([], row_to_note)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(notes)
+            })
+            .await
+    }
+
+    async fn list_trashed(&self) -> Result<Vec<Note>, DomainError> {
+        self.db
+            .call(|c| {
+                let mut stmt = c.prepare_cached(
+                    "SELECT id, title, body, created_at, updated_at, deleted_at, version
+                     FROM notes WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC",
                 )?;
                 let notes = stmt
                     .query_map([], row_to_note)?
@@ -237,6 +266,47 @@ mod tests {
         let listed = repo.list().await.unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].title, "Keep");
+    }
+
+    #[tokio::test]
+    async fn get_any_returns_deleted_notes() {
+        let db = Database::open_in_memory().unwrap();
+        let repo = SqliteNoteRepository::new(db);
+        let id = NoteId::new();
+        repo.upsert(&sample(id, "Gone")).await.unwrap();
+        repo.soft_delete(&id, 2000).await.unwrap();
+
+        assert!(
+            repo.get(&id).await.unwrap().is_none(),
+            "get filters deleted"
+        );
+        let any = repo
+            .get_any(&id)
+            .await
+            .unwrap()
+            .expect("get_any sees deleted");
+        assert_eq!(any.title, "Gone");
+        assert_eq!(any.deleted_at, Some(2000));
+    }
+
+    #[tokio::test]
+    async fn list_trashed_includes_only_deleted_newest_first() {
+        let db = Database::open_in_memory().unwrap();
+        let repo = SqliteNoteRepository::new(db);
+        let live = NoteId::new();
+        let old = NoteId::new();
+        let recent = NoteId::new();
+        repo.upsert(&sample(live, "Live")).await.unwrap();
+        repo.upsert(&sample(old, "Old")).await.unwrap();
+        repo.upsert(&sample(recent, "Recent")).await.unwrap();
+
+        repo.soft_delete(&old, 1000).await.unwrap();
+        repo.soft_delete(&recent, 3000).await.unwrap();
+
+        let trashed = repo.list_trashed().await.unwrap();
+        assert_eq!(trashed.len(), 2);
+        assert_eq!(trashed[0].title, "Recent");
+        assert_eq!(trashed[1].title, "Old");
     }
 
     async fn fts_count(db: &Database, note_id: &str) -> i64 {

@@ -23,8 +23,15 @@ use raki_storage::{
     SqliteNoteRepository, SqliteVectorIndex,
 };
 
-use crate::commands::notes::{create_note, get_note, list_notes, search_notes, update_note};
-use crate::commands::qa::{answer_question, grant_cloud_consent, revoke_cloud_consent};
+use crate::commands::notes::{
+    create_note, delete_note, get_note, list_notes, list_trashed_notes, restore_note, search_notes,
+    update_note,
+};
+use crate::commands::qa::answer_question;
+use crate::commands::settings::{
+    get_egress_settings, grant_provider_consent, list_egress_log, revoke_provider_consent,
+    set_egress_mode,
+};
 use crate::indexing::IndexingService;
 use crate::state::AppState;
 
@@ -118,7 +125,7 @@ pub fn run() {
             let gate = Arc::new(GatedLlmProvider::new(
                 inner,
                 settings.clone(),
-                egress_log,
+                egress_log.clone(),
                 clock.clone(),
             ));
 
@@ -132,6 +139,7 @@ pub fn run() {
                 index,
                 gate,
                 settings,
+                egress_log,
                 provider,
                 model,
                 k: 10,
@@ -145,9 +153,15 @@ pub fn run() {
             get_note,
             search_notes,
             update_note,
+            delete_note,
+            restore_note,
+            list_trashed_notes,
             answer_question,
-            grant_cloud_consent,
-            revoke_cloud_consent
+            get_egress_settings,
+            set_egress_mode,
+            grant_provider_consent,
+            revoke_provider_consent,
+            list_egress_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -4,6 +4,6 @@ export type { AnswerOutcome };
 
 export const qaApi = {
   ask: (query: string) => commands.answerQuestion(query),
-  grant: (provider: string) => commands.grantCloudConsent(provider),
-  revoke: (provider: string) => commands.revokeCloudConsent(provider),
+  grant: (provider: string) => commands.grantProviderConsent(provider),
+  revoke: (provider: string) => commands.revokeProviderConsent(provider),
 };

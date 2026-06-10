@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use raki_ai::GatedLlmProvider;
 use raki_domain::{
-    Clock, EgressSettings, EmbeddingProvider, KeywordIndex, NoteRepository, Reranker, VectorIndex,
+    Clock, EgressLog, EgressSettings, EmbeddingProvider, KeywordIndex, NoteRepository, Reranker,
+    VectorIndex,
 };
 
 use crate::indexing::IndexingService;
@@ -23,6 +24,8 @@ pub struct AppState {
     pub gate: Arc<GatedLlmProvider>,
     /// Consent + mode mutation surface for the consent commands.
     pub settings: Arc<dyn EgressSettings>,
+    /// Audit log query surface for the settings UI.
+    pub egress_log: Arc<dyn EgressLog>,
     /// The cloud provider/model the egress decision is attributed to (display + consent key).
     pub provider: String,
     pub model: String,

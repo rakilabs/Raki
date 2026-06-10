@@ -25,7 +25,11 @@ pub trait NoteRepository: Send + Sync {
     /// Distinct from `upsert`, which deliberately creates/resurrects.
     async fn update(&self, note: &Note) -> Result<bool, DomainError>;
     async fn get(&self, id: &NoteId) -> Result<Option<Note>, DomainError>;
+    /// Get a note regardless of `deleted_at` status — needed for restore and trash inspection.
+    async fn get_any(&self, id: &NoteId) -> Result<Option<Note>, DomainError>;
     async fn list(&self) -> Result<Vec<Note>, DomainError>;
+    /// Notes with `deleted_at IS NOT NULL`, newest-first by `deleted_at`.
+    async fn list_trashed(&self) -> Result<Vec<Note>, DomainError>;
     async fn soft_delete(&self, id: &NoteId, at_ms: i64) -> Result<(), DomainError>;
 }
 

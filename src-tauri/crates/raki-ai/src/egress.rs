@@ -174,6 +174,9 @@ mod gate_tests {
         ) -> Result<(), DomainError> {
             Ok(())
         }
+        async fn list_recent(&self, _limit: usize) -> Result<Vec<EgressRecord>, DomainError> {
+            Ok(self.rows.lock().unwrap().clone())
+        }
     }
 
     /// An `EgressLog` whose `record` write always fails — to prove the audit-or-fail contract.
@@ -189,6 +192,9 @@ mod gate_tests {
             _grounded: bool,
         ) -> Result<(), DomainError> {
             Ok(())
+        }
+        async fn list_recent(&self, _limit: usize) -> Result<Vec<EgressRecord>, DomainError> {
+            Ok(vec![])
         }
     }
 

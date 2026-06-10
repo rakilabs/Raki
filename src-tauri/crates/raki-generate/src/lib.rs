@@ -234,7 +234,13 @@ mod flow_tests {
             Ok((*id == self.0)
                 .then(|| Note::new("Trip".into(), "Pay cash at the ryokan.".into(), 0)))
         }
+        async fn get_any(&self, id: &NoteId) -> Result<Option<Note>, DomainError> {
+            self.get(id).await
+        }
         async fn list(&self) -> Result<Vec<Note>, DomainError> {
+            Ok(vec![])
+        }
+        async fn list_trashed(&self) -> Result<Vec<Note>, DomainError> {
             Ok(vec![])
         }
         async fn soft_delete(&self, _: &NoteId, _: i64) -> Result<(), DomainError> {
@@ -253,7 +259,13 @@ mod flow_tests {
         async fn get(&self, _: &NoteId) -> Result<Option<Note>, DomainError> {
             Ok(None)
         }
+        async fn get_any(&self, _: &NoteId) -> Result<Option<Note>, DomainError> {
+            Ok(None)
+        }
         async fn list(&self) -> Result<Vec<Note>, DomainError> {
+            Ok(vec![])
+        }
+        async fn list_trashed(&self) -> Result<Vec<Note>, DomainError> {
             Ok(vec![])
         }
         async fn soft_delete(&self, _: &NoteId, _: i64) -> Result<(), DomainError> {
@@ -272,6 +284,9 @@ mod flow_tests {
         async fn set_grounded(&self, id: &EgressLogId, g: bool) -> Result<(), DomainError> {
             self.grounded.lock().unwrap().push((*id, g));
             Ok(())
+        }
+        async fn list_recent(&self, _limit: usize) -> Result<Vec<EgressRecord>, DomainError> {
+            Ok(vec![])
         }
     }
     struct CloudSettings;

@@ -17,6 +17,8 @@ pub struct NoteDto {
     pub created_at: i64,
     #[ts(type = "number")]
     pub updated_at: i64,
+    #[ts(type = "number | null")]
+    pub deleted_at: Option<i64>,
 }
 
 impl From<Note> for NoteDto {
@@ -27,6 +29,7 @@ impl From<Note> for NoteDto {
             body: raki_domain::body_to_text(&n.body),
             created_at: n.created_at,
             updated_at: n.updated_at,
+            deleted_at: n.deleted_at,
         }
     }
 }
@@ -80,4 +83,24 @@ pub enum AnswerOutcome {
         text: String,
         cited: Vec<CitedNote>,
     },
+}
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/shared/ipc/bindings/")]
+pub struct EgressSettingsDto {
+    pub mode: String,
+    pub consented_providers: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/shared/ipc/bindings/")]
+pub struct EgressLogEntryDto {
+    pub id: String,
+    pub provider: String,
+    pub model: String,
+    pub token_count: i64,
+    pub source_count: usize,
+    pub success: bool,
+    #[ts(type = "number")]
+    pub created_at: i64,
 }

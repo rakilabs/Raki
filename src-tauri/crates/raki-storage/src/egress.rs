@@ -3,7 +3,10 @@
 use async_trait::async_trait;
 use rusqlite::{params, OptionalExtension};
 
-use raki_domain::{DomainError, EgressLog, EgressLogId, EgressRecord, EgressSettings, Mode};
+use raki_domain::{
+    DomainError, EgressDecision, EgressLog, EgressLogId, EgressRecord, EgressSettings, Mode,
+    SourceId,
+};
 
 use crate::db::Database;
 
@@ -61,6 +64,45 @@ impl EgressLog for SqliteEgressLog {
                     return Err(rusqlite::Error::QueryReturnedNoRows);
                 }
                 Ok(())
+            })
+            .await
+    }
+
+    async fn list_recent(&self, limit: usize) -> Result<Vec<EgressRecord>, DomainError> {
+        let limit = limit as i64;
+        self.db
+            .call(move |c| {
+                let mut stmt = c.prepare(
+                    "SELECT id, created_at, provider, model, token_count, source_ids, success
+                     FROM egress_log ORDER BY created_at DESC LIMIT ?1",
+                )?;
+                let rows = stmt
+                    .query_map(params![limit], |r| {
+                        let id: String = r.get(0)?;
+                        let created_at: i64 = r.get(1)?;
+                        let provider: String = r.get(2)?;
+                        let model: String = r.get(3)?;
+                        let token_count: i64 = r.get(4)?;
+                        let source_ids_json: String = r.get(5)?;
+                        let success: i64 = r.get(6)?;
+                        let source_ids: Vec<SourceId> = serde_json::from_str(&source_ids_json)
+                            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                        Ok(EgressRecord {
+                            id: EgressLogId::parse(&id).map_err(|e| {
+                                rusqlite::Error::ToSqlConversionFailure(Box::new(e))
+                            })?,
+                            decision: EgressDecision {
+                                provider,
+                                model,
+                                source_ids,
+                                total_tokens: token_count as usize,
+                            },
+                            completed_at: created_at,
+                            success: success != 0,
+                        })
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
             })
             .await
     }

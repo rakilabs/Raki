@@ -222,6 +222,40 @@ pub async fn update_note(
     Ok(NoteDto::from(edited))
 }
 
+#[tauri::command]
+pub async fn delete_note(state: State<'_, AppState>, id: String) -> Result<(), AppError> {
+    let nid = NoteId::parse(&id)?;
+    state.notes.soft_delete(&nid, state.clock.now_ms()).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn restore_note(state: State<'_, AppState>, id: String) -> Result<NoteDto, AppError> {
+    let nid = NoteId::parse(&id)?;
+    let mut note = state.notes.get_any(&nid).await?.ok_or_else(|| AppError {
+        kind: "not_found".into(),
+        message: "note not found".into(),
+    })?;
+    if note.deleted_at.is_none() {
+        return Err(AppError {
+            kind: "bad_request".into(),
+            message: "note is not deleted".into(),
+        });
+    }
+    note.deleted_at = None;
+    note.updated_at = state.clock.now_ms();
+    note.version += 1;
+    state.notes.upsert(&note).await?;
+    state.index.trigger();
+    Ok(NoteDto::from(note))
+}
+
+#[tauri::command]
+pub async fn list_trashed_notes(state: State<'_, AppState>) -> Result<Vec<NoteDto>, AppError> {
+    let notes = state.notes.list_trashed().await?;
+    Ok(notes.into_iter().map(NoteDto::from).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

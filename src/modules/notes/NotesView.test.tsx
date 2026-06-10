@@ -26,9 +26,9 @@ describe("NotesView editor", () => {
 
   it("selecting a note populates the editor and Save delegates to update", async () => {
     mocked.list.mockResolvedValue([
-      { id: "n1", title: "Trip", body: "Pay cash", created_at: 0, updated_at: 0 },
+      { id: "n1", title: "Trip", body: "Pay cash", created_at: 0, updated_at: 0, deleted_at: null },
     ]);
-    mocked.update.mockResolvedValue({ id: "n1", title: "Trip", body: "Pay card", created_at: 0, updated_at: 1 });
+    mocked.update.mockResolvedValue({ id: "n1", title: "Trip", body: "Pay card", created_at: 0, updated_at: 1, deleted_at: null });
     renderView();
 
     fireEvent.click(await screen.findByRole("button", { name: "Trip" }));
@@ -44,7 +44,7 @@ describe("NotesView editor", () => {
   });
 
   it("renders (Untitled) for a blank-title note", async () => {
-    mocked.list.mockResolvedValue([{ id: "n2", title: "  ", body: "", created_at: 0, updated_at: 0 }]);
+    mocked.list.mockResolvedValue([{ id: "n2", title: "  ", body: "", created_at: 0, updated_at: 0, deleted_at: null }]);
     renderView();
     expect(await screen.findByRole("button", { name: "(Untitled)" })).toBeDefined();
   });

@@ -10,6 +10,7 @@ export function NotesView() {
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [editTitle, setEditTitle] = createSignal("");
   const [editBody, setEditBody] = createSignal("");
+  const [showTrash, setShowTrash] = createSignal(false);
 
   createEffect(() => {
     const q = search();
@@ -19,9 +20,11 @@ export function NotesView() {
 
   const notes = createQuery(() => {
     const q = debouncedSearch();
+    const trash = showTrash();
     return {
-      queryKey: q ? notesKeys.search(q) : notesKeys.all,
-      queryFn: () => (q ? notesApi.search(q) : notesApi.list()),
+      queryKey: trash ? notesKeys.trashed : q ? notesKeys.search(q) : notesKeys.all,
+      queryFn: () =>
+        trash ? notesApi.listTrashed() : q ? notesApi.search(q) : notesApi.list(),
     };
   });
 
@@ -29,7 +32,6 @@ export function NotesView() {
     (notes.data ?? []).find((n) => n.id === selectedId()),
   );
 
-  // Seed the editor fields only when the selected note id changes (not on every query refresh).
   createEffect(() => {
     const id = selectedId();
     if (id) {
@@ -55,6 +57,23 @@ export function NotesView() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: notesKeys.all }),
   }));
 
+  const deleteNote = createMutation(() => ({
+    mutationFn: (id: string) => notesApi.delete(id),
+    onSuccess: () => {
+      setSelectedId(null);
+      queryClient.invalidateQueries({ queryKey: notesKeys.all });
+      queryClient.invalidateQueries({ queryKey: notesKeys.trashed });
+    },
+  }));
+
+  const restoreNote = createMutation(() => ({
+    mutationFn: (id: string) => notesApi.restore(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: notesKeys.all });
+      queryClient.invalidateQueries({ queryKey: notesKeys.trashed });
+    },
+  }));
+
   return (
     <section>
       <h1>Notes</h1>
@@ -66,21 +85,35 @@ export function NotesView() {
         onInput={(e) => setSearch(e.currentTarget.value)}
       />
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (title().trim()) createNote.mutate();
-        }}
-      >
+      <Show when={!showTrash()}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (title().trim()) createNote.mutate();
+          }}
+        >
+          <input
+            placeholder="New note title…"
+            value={title()}
+            onInput={(e) => setTitle(e.currentTarget.value)}
+          />
+          <button type="submit" disabled={createNote.isPending}>
+            Add
+          </button>
+        </form>
+      </Show>
+
+      <label>
         <input
-          placeholder="New note title…"
-          value={title()}
-          onInput={(e) => setTitle(e.currentTarget.value)}
+          type="checkbox"
+          checked={showTrash()}
+          onChange={(e) => {
+            setShowTrash(e.currentTarget.checked);
+            setSelectedId(null);
+          }}
         />
-        <button type="submit" disabled={createNote.isPending}>
-          Add
-        </button>
-      </form>
+        Show trash
+      </label>
 
       <div class="notes-layout">
         <Show when={!notes.isLoading} fallback={<p>Loading…</p>}>
@@ -91,19 +124,42 @@ export function NotesView() {
                   <button type="button" onClick={() => setSelectedId(n.id)}>
                     {n.title.trim() || "(Untitled)"}
                   </button>
+                  <Show
+                    when={showTrash()}
+                    fallback={
+                      <button
+                        type="button"
+                        onClick={() => deleteNote.mutate(n.id)}
+                        disabled={deleteNote.isPending}
+                        title="Delete"
+                      >
+                        🗑
+                      </button>
+                    }
+                  >
+                    <button
+                      type="button"
+                      onClick={() => restoreNote.mutate(n.id)}
+                      disabled={restoreNote.isPending}
+                      title="Restore"
+                    >
+                      ↩
+                    </button>
+                  </Show>
                 </li>
               )}
             </For>
           </ul>
         </Show>
 
-        <Show when={selected()}>
-          {(s) => (
+        <Show when={!showTrash() && selected()}>
+          {(s) => {
+            const n = s();
+            return (
             <form
               class="note-editor"
               onSubmit={(e) => {
                 e.preventDefault();
-                const n = s();
                 if (n && editTitle().trim()) {
                   saveNote.mutate({
                     id: n.id,
@@ -133,7 +189,8 @@ export function NotesView() {
                 <p role="alert">Save failed — please try again.</p>
               </Show>
             </form>
-          )}
+            );
+          }}
         </Show>
       </div>
     </section>

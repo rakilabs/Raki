@@ -117,6 +117,8 @@ pub trait EgressLog: Send + Sync {
     async fn record(&self, rec: &EgressRecord) -> Result<(), DomainError>;
     /// Attach the groundedness verdict to an already-logged egress row.
     async fn set_grounded(&self, id: &EgressLogId, grounded: bool) -> Result<(), DomainError>;
+    /// Recent egress entries, newest-first, at most `limit`.
+    async fn list_recent(&self, limit: usize) -> Result<Vec<EgressRecord>, DomainError>;
 }
 
 /// Live-read egress settings: the master mode + per-provider consent. Read every call (no caching).
