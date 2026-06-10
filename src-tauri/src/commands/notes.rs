@@ -27,7 +27,9 @@ fn cap_text(s: &str, max_bytes: usize) -> String {
 
 use std::time::Duration;
 
-use raki_domain::{body_to_text, EmbeddingProvider, KeywordIndex, NoteRepository, Reranker, VectorIndex};
+use raki_domain::{
+    body_to_text, EmbeddingProvider, KeywordIndex, NoteRepository, Reranker, VectorIndex,
+};
 
 use std::collections::HashMap;
 
@@ -105,7 +107,11 @@ async fn search_reranked(
 
     // 4. Decide final id order: rerank if present & it succeeds in time, else hybrid top-K.
     let hybrid_top_k = || -> Vec<String> {
-        candidates.iter().take(K).map(|(id, _)| id.clone()).collect()
+        candidates
+            .iter()
+            .take(K)
+            .map(|(id, _)| id.clone())
+            .collect()
     };
     let ranked_ids: Vec<String> = match reranker {
         Some(r) => rerank_top_k(r, query, &candidates, K, RERANK_TIMEOUT)
@@ -115,8 +121,10 @@ async fn search_reranked(
     };
 
     // 5. Map ranked ids → Notes, consuming the already-hydrated set (no second fetch).
-    let mut by_id: HashMap<String, Note> =
-        hydrated.into_iter().map(|n| (n.id.to_string(), n)).collect();
+    let mut by_id: HashMap<String, Note> = hydrated
+        .into_iter()
+        .map(|n| (n.id.to_string(), n))
+        .collect();
     Ok(ranked_ids
         .iter()
         .filter_map(|id| by_id.remove(id))
@@ -172,29 +180,23 @@ pub async fn get_note(state: State<'_, AppState>, id: String) -> Result<Option<N
     Ok(state.notes.get(&note_id).await?.map(NoteDto::from))
 }
 
-/// Hybrid search: fuse FTS5 keyword + sqlite-vec vector rankings (RRF), then hydrate
-/// the ranked ids to DTOs. (Hydration is one `get` per hit; fine at k = 20.)
+/// Hybrid recall → optional local rerank → DTOs. Reranking is best-effort (ADR-0008): if the
+/// reranker is absent, errors, or times out, results fall back to the hybrid top-K.
 #[tauri::command]
 pub async fn search_notes(
     state: State<'_, AppState>,
     query: String,
 ) -> Result<Vec<NoteDto>, AppError> {
-    let ids = raki_retrieval::hybrid_search(
+    let notes = search_reranked(
+        state.notes.as_ref(),
         state.keyword.as_ref(),
         state.vectors.as_ref(),
         state.embedder.as_ref(),
+        state.reranker.as_deref(),
         &query,
-        20,
     )
     .await?;
-    let mut out = Vec::with_capacity(ids.len());
-    for id in ids {
-        let note_id = NoteId::parse(&id)?;
-        if let Some(note) = state.notes.get(&note_id).await? {
-            out.push(NoteDto::from(note));
-        }
-    }
-    Ok(out)
+    Ok(notes.into_iter().map(NoteDto::from).collect())
 }
 
 #[tauri::command]
@@ -253,8 +255,12 @@ mod tests {
     struct ErrReranker;
     #[async_trait]
     impl Reranker for ErrReranker {
-        fn locality(&self) -> Locality { Locality::Local }
-        fn model_id(&self) -> String { "err".into() }
+        fn locality(&self) -> Locality {
+            Locality::Local
+        }
+        fn model_id(&self) -> String {
+            "err".into()
+        }
         async fn rerank(&self, _q: &str, _d: &[String]) -> Result<Vec<RerankScore>, DomainError> {
             Err(DomainError::Provider("boom".into()))
         }
@@ -263,8 +269,12 @@ mod tests {
     struct HangReranker;
     #[async_trait]
     impl Reranker for HangReranker {
-        fn locality(&self) -> Locality { Locality::Local }
-        fn model_id(&self) -> String { "hang".into() }
+        fn locality(&self) -> Locality {
+            Locality::Local
+        }
+        fn model_id(&self) -> String {
+            "hang".into()
+        }
         async fn rerank(&self, _q: &str, _d: &[String]) -> Result<Vec<RerankScore>, DomainError> {
             tokio::time::sleep(Duration::from_secs(60)).await;
             Ok(Vec::new())
@@ -280,26 +290,57 @@ mod tests {
 
     #[tokio::test]
     async fn rerank_top_k_returns_some_on_success() {
-        let out = rerank_top_k(&FakeReranker, "apple", &candidates(), 10, Duration::from_secs(5)).await;
+        let out = rerank_top_k(
+            &FakeReranker,
+            "apple",
+            &candidates(),
+            10,
+            Duration::from_secs(5),
+        )
+        .await;
         let ids = out.expect("FakeReranker succeeds → Some");
-        assert_eq!(ids.first().map(String::as_str), Some("a"), "apple doc ranked first");
+        assert_eq!(
+            ids.first().map(String::as_str),
+            Some("a"),
+            "apple doc ranked first"
+        );
     }
 
     #[tokio::test]
     async fn rerank_top_k_returns_none_on_error() {
-        let out = rerank_top_k(&ErrReranker, "apple", &candidates(), 10, Duration::from_secs(5)).await;
-        assert!(out.is_none(), "rerank error → None (caller uses hybrid order)");
+        let out = rerank_top_k(
+            &ErrReranker,
+            "apple",
+            &candidates(),
+            10,
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(
+            out.is_none(),
+            "rerank error → None (caller uses hybrid order)"
+        );
     }
 
     #[tokio::test]
     async fn rerank_top_k_returns_none_on_timeout() {
         // 1 ms budget against a 60 s reranker → timeout fallback, fast.
-        let out = rerank_top_k(&HangReranker, "apple", &candidates(), 10, Duration::from_millis(1)).await;
-        assert!(out.is_none(), "rerank timeout → None (caller uses hybrid order)");
+        let out = rerank_top_k(
+            &HangReranker,
+            "apple",
+            &candidates(),
+            10,
+            Duration::from_millis(1),
+        )
+        .await;
+        assert!(
+            out.is_none(),
+            "rerank timeout → None (caller uses hybrid order)"
+        );
     }
 
     use raki_ai::FakeEmbeddingProvider;
-    use raki_domain::{body_to_text, EmbeddingProvider, Note, NoteRepository, VectorIndex};
+    use raki_domain::{EmbeddingProvider, Note, NoteRepository, VectorIndex};
     use raki_storage::{Database, SqliteKeywordIndex, SqliteNoteRepository, SqliteVectorIndex};
 
     /// Build an in-memory index over the given (title, plain-body) notes (relational + FTS5 +
@@ -330,11 +371,21 @@ mod tests {
 
     #[tokio::test]
     async fn search_reranked_none_returns_hybrid_hits() {
-        let (repo, keyword, vectors, embedder) =
-            index_with(&[("Apples", "granny smith apples"), ("Oceans", "deep blue water")]).await;
-        let out = search_reranked(&repo, &keyword, &vectors, &embedder as &dyn EmbeddingProvider, None, "apples")
-            .await
-            .unwrap();
+        let (repo, keyword, vectors, embedder) = index_with(&[
+            ("Apples", "granny smith apples"),
+            ("Oceans", "deep blue water"),
+        ])
+        .await;
+        let out = search_reranked(
+            &repo,
+            &keyword,
+            &vectors,
+            &embedder as &dyn EmbeddingProvider,
+            None,
+            "apples",
+        )
+        .await
+        .unwrap();
         assert!(!out.is_empty(), "hybrid recall returns the apples note");
         assert!(out.iter().any(|n| n.title == "Apples"));
         assert!(out.len() <= K);
@@ -342,14 +393,25 @@ mod tests {
 
     #[tokio::test]
     async fn search_reranked_some_reaches_rerank_and_maps_back_to_notes() {
-        let (repo, keyword, vectors, embedder) =
-            index_with(&[("Apples", "granny smith apples"), ("Oceans", "deep blue water")]).await;
+        let (repo, keyword, vectors, embedder) = index_with(&[
+            ("Apples", "granny smith apples"),
+            ("Oceans", "deep blue water"),
+        ])
+        .await;
         let out = search_reranked(
-            &repo, &keyword, &vectors, &embedder as &dyn EmbeddingProvider, Some(&FakeReranker), "apples",
+            &repo,
+            &keyword,
+            &vectors,
+            &embedder as &dyn EmbeddingProvider,
+            Some(&FakeReranker),
+            "apples",
         )
         .await
         .unwrap();
-        assert!(out.iter().any(|n| n.title == "Apples"), "rerank path returns valid, mapped notes");
+        assert!(
+            out.iter().any(|n| n.title == "Apples"),
+            "rerank path returns valid, mapped notes"
+        );
     }
 
     #[tokio::test]
@@ -357,10 +419,18 @@ mod tests {
         let big = "word ".repeat(2000); // ~10 KB plain text → capped to MAX_RERANK_DOC_BYTES
         let (repo, keyword, vectors, embedder) = index_with(&[("Big", &big)]).await;
         let out = search_reranked(
-            &repo, &keyword, &vectors, &embedder as &dyn EmbeddingProvider, Some(&FakeReranker), "word",
+            &repo,
+            &keyword,
+            &vectors,
+            &embedder as &dyn EmbeddingProvider,
+            Some(&FakeReranker),
+            "word",
         )
         .await
         .unwrap();
-        assert!(out.iter().any(|n| n.title == "Big"), "oversized note returned, no panic");
+        assert!(
+            out.iter().any(|n| n.title == "Big"),
+            "oversized note returned, no panic"
+        );
     }
 }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use raki_ai::GatedLlmProvider;
 use raki_domain::{
-    Clock, EgressSettings, EmbeddingProvider, KeywordIndex, NoteRepository, VectorIndex,
+    Clock, EgressSettings, EmbeddingProvider, KeywordIndex, NoteRepository, Reranker, VectorIndex,
 };
 
 use crate::indexing::IndexingService;
@@ -14,6 +14,9 @@ pub struct AppState {
     pub keyword: Arc<dyn KeywordIndex>,
     pub vectors: Arc<dyn VectorIndex>,
     pub embedder: Arc<dyn EmbeddingProvider>,
+    /// Optional local cross-encoder reranker (attach-to-validate, ADR-0008). `None` degrades
+    /// search to hybrid-only; best-effort, never required for search to work.
+    pub reranker: Option<Arc<dyn Reranker>>,
     pub clock: Arc<dyn Clock>,
     pub index: Arc<IndexingService>,
     /// The only cloud-completion path (wraps MessagesProvider; reads consent live; logs egress).

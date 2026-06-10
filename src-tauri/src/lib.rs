@@ -11,10 +11,12 @@ use std::sync::Arc;
 
 use tauri::Manager;
 
-use raki_ai::{FakeEmbeddingProvider, FastEmbedProvider, GatedLlmProvider, MessagesProvider};
+use raki_ai::{
+    FakeEmbeddingProvider, FastEmbedProvider, FastEmbedReranker, GatedLlmProvider, MessagesProvider,
+};
 use raki_domain::{
     Clock, Completion, CompletionRequest, DomainError, EmbeddingProvider, IndexingStore,
-    LlmProvider, Locality, VectorIndex,
+    LlmProvider, Locality, Reranker, VectorIndex,
 };
 use raki_storage::{
     Database, SqliteEgressLog, SqliteEgressSettings, SqliteIndexingStore, SqliteKeywordIndex,
@@ -81,6 +83,16 @@ pub fn run() {
                 }
             };
 
+            let reranker: Option<Arc<dyn Reranker>> = match FastEmbedReranker::try_new() {
+                Ok(r) => Some(Arc::new(r)),
+                Err(e) => {
+                    eprintln!(
+                        "reranker unavailable ({e}); search runs without reranking this session"
+                    );
+                    None
+                }
+            };
+
             let index = Arc::new(IndexingService::new(
                 store,
                 embedder.clone(),
@@ -115,6 +127,7 @@ pub fn run() {
                 keyword,
                 vectors,
                 embedder,
+                reranker,
                 clock,
                 index,
                 gate,
