@@ -2,7 +2,7 @@
 
 use tauri::State;
 
-use raki_domain::{text_to_body, Note, NoteId};
+use raki_domain::{text_to_body, DomainError, Note, NoteId};
 
 use crate::dto::{CreateNoteInput, NoteDto, UpdateNoteInput};
 use crate::error::AppError;
@@ -27,7 +27,9 @@ fn cap_text(s: &str, max_bytes: usize) -> String {
 
 use std::time::Duration;
 
-use raki_domain::Reranker;
+use raki_domain::{body_to_text, EmbeddingProvider, KeywordIndex, NoteRepository, Reranker, VectorIndex};
+
+use std::collections::HashMap;
 
 /// Rerank `candidates` to top-`k`, bounded by `timeout`. Returns `Some(ids)` on success, or
 /// `None` (the caller falls back to hybrid order) on timeout or any rerank error. The forward
@@ -57,6 +59,68 @@ async fn rerank_top_k(
             None
         }
     }
+}
+
+/// Recall-union depth fed to the reranker — the exact pool `bench` reranked on SciFact.
+const POOL: usize = 100;
+/// Number of results returned for display.
+const K: usize = 20;
+/// Per-candidate text cap before reranking (review #3).
+const MAX_RERANK_DOC_BYTES: usize = 4096;
+/// Hard bound on a single rerank call before falling back to hybrid (review #1).
+const RERANK_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Production search: hybrid recall union → (size-capped) candidates → optional rerank →
+/// top-`K` notes. A missing reranker, a rerank error, or a rerank timeout all fall back to the
+/// hybrid top-`K` (which is bit-for-bit today's behavior), so search never breaks (D4).
+async fn search_reranked(
+    notes: &dyn NoteRepository,
+    keyword: &dyn KeywordIndex,
+    vectors: &dyn VectorIndex,
+    embedder: &dyn EmbeddingProvider,
+    reranker: Option<&dyn Reranker>,
+    query: &str,
+) -> Result<Vec<Note>, DomainError> {
+    // 1. Recall union (unchanged retrieval fn).
+    let pool = raki_retrieval::hybrid_candidates(keyword, vectors, embedder, query, POOL).await?;
+
+    // 2. Hydrate pool ids → Notes in pool order; skip any deleted mid-flight.
+    let mut hydrated: Vec<Note> = Vec::with_capacity(pool.len());
+    for id in &pool {
+        let nid = NoteId::parse(id)?;
+        if let Some(note) = notes.get(&nid).await? {
+            hydrated.push(note);
+        }
+    }
+
+    // 3. Build (id, size-capped text) candidate pairs in the same order — the representation
+    //    run_benchmark reranked.
+    let candidates: Vec<(String, String)> = hydrated
+        .iter()
+        .map(|n| {
+            let text = format!("{}\n\n{}", n.title, body_to_text(&n.body));
+            (n.id.to_string(), cap_text(&text, MAX_RERANK_DOC_BYTES))
+        })
+        .collect();
+
+    // 4. Decide final id order: rerank if present & it succeeds in time, else hybrid top-K.
+    let hybrid_top_k = || -> Vec<String> {
+        candidates.iter().take(K).map(|(id, _)| id.clone()).collect()
+    };
+    let ranked_ids: Vec<String> = match reranker {
+        Some(r) => rerank_top_k(r, query, &candidates, K, RERANK_TIMEOUT)
+            .await
+            .unwrap_or_else(hybrid_top_k),
+        None => hybrid_top_k(),
+    };
+
+    // 5. Map ranked ids → Notes, consuming the already-hydrated set (no second fetch).
+    let mut by_id: HashMap<String, Note> =
+        hydrated.into_iter().map(|n| (n.id.to_string(), n)).collect();
+    Ok(ranked_ids
+        .iter()
+        .filter_map(|id| by_id.remove(id))
+        .collect())
 }
 
 /// Boundary validation shared by create + update (review M1). Returns the trimmed title
@@ -232,5 +296,71 @@ mod tests {
         // 1 ms budget against a 60 s reranker → timeout fallback, fast.
         let out = rerank_top_k(&HangReranker, "apple", &candidates(), 10, Duration::from_millis(1)).await;
         assert!(out.is_none(), "rerank timeout → None (caller uses hybrid order)");
+    }
+
+    use raki_ai::FakeEmbeddingProvider;
+    use raki_domain::{body_to_text, EmbeddingProvider, Note, NoteRepository, VectorIndex};
+    use raki_storage::{Database, SqliteKeywordIndex, SqliteNoteRepository, SqliteVectorIndex};
+
+    /// Build an in-memory index over the given (title, plain-body) notes (relational + FTS5 +
+    /// vectors), mirroring the run_benchmark construction. Returns the four index handles.
+    async fn index_with(
+        notes: &[(&str, &str)],
+    ) -> (
+        SqliteNoteRepository,
+        SqliteKeywordIndex,
+        SqliteVectorIndex,
+        FakeEmbeddingProvider,
+    ) {
+        let db = Database::open_in_memory().unwrap();
+        let repo = SqliteNoteRepository::new(db.clone());
+        let keyword = SqliteKeywordIndex::new(db.clone());
+        let vectors = SqliteVectorIndex::new(db.clone());
+        let embedder = FakeEmbeddingProvider::new(384);
+        for (title, body) in notes {
+            let note = Note::new((*title).to_string(), text_to_body(body), 1000);
+            let id = note.id.to_string();
+            repo.upsert(&note).await.unwrap();
+            let text = format!("{title}\n\n{body}");
+            let emb = embedder.embed(std::slice::from_ref(&text)).await.unwrap();
+            vectors.upsert(&id, &emb[0]).await.unwrap();
+        }
+        (repo, keyword, vectors, embedder)
+    }
+
+    #[tokio::test]
+    async fn search_reranked_none_returns_hybrid_hits() {
+        let (repo, keyword, vectors, embedder) =
+            index_with(&[("Apples", "granny smith apples"), ("Oceans", "deep blue water")]).await;
+        let out = search_reranked(&repo, &keyword, &vectors, &embedder as &dyn EmbeddingProvider, None, "apples")
+            .await
+            .unwrap();
+        assert!(!out.is_empty(), "hybrid recall returns the apples note");
+        assert!(out.iter().any(|n| n.title == "Apples"));
+        assert!(out.len() <= K);
+    }
+
+    #[tokio::test]
+    async fn search_reranked_some_reaches_rerank_and_maps_back_to_notes() {
+        let (repo, keyword, vectors, embedder) =
+            index_with(&[("Apples", "granny smith apples"), ("Oceans", "deep blue water")]).await;
+        let out = search_reranked(
+            &repo, &keyword, &vectors, &embedder as &dyn EmbeddingProvider, Some(&FakeReranker), "apples",
+        )
+        .await
+        .unwrap();
+        assert!(out.iter().any(|n| n.title == "Apples"), "rerank path returns valid, mapped notes");
+    }
+
+    #[tokio::test]
+    async fn search_reranked_handles_oversized_body_without_panicking() {
+        let big = "word ".repeat(2000); // ~10 KB plain text → capped to MAX_RERANK_DOC_BYTES
+        let (repo, keyword, vectors, embedder) = index_with(&[("Big", &big)]).await;
+        let out = search_reranked(
+            &repo, &keyword, &vectors, &embedder as &dyn EmbeddingProvider, Some(&FakeReranker), "word",
+        )
+        .await
+        .unwrap();
+        assert!(out.iter().any(|n| n.title == "Big"), "oversized note returned, no panic");
     }
 }
