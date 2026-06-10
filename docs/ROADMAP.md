@@ -47,7 +47,7 @@ Plan: `docs/superpowers/plans/2026-06-08-r0-scifact-benchmark-tier.md`.
 (calibrated vs published bge-small ≈0.65), reranked **0.7440**. The bi-encoder does not catastrophically
 fail on SciFact, but the reranker shows measurable lift — the corpus serves R1.
 
-### ⬜ R1 — Reranker decision *(precision lever)* — unblocked by R0
+### ✅ R1 — Reranker decision *(precision lever)*
 **Goal:** re-measure `reranked` vs `hybrid` on the failing corpus → **attach** the cross-encoder into
 production `search_notes` (+ `AppState` wiring) **or delete** it per the committed kill-switch
 (`docs/eval/reranker-deletion-criteria.md`: +0.03 nDCG ⇒ attach, else remove).
@@ -58,6 +58,11 @@ Recall@10, +0.0319 MAP) — lift consistent across all three metrics, directiona
 The earlier 100-doc smoke test read +0.0566; the full corpus is the honest, harder number. This is
 domain-shifted evidence per ADR-0007 — the binding +0.03 verdict is on **real-notes** ground truth, so
 R1 carries the reranker as *attach-to-validate*, not yet attached.
+**Status:** ✅ Done. Reranker attached to production `search_notes` as **attach-to-validate**
+(ADR-0008): local cross-encoder reranks the 100-pool to top-20, best-effort with hybrid fallback
+(timeout/error/missing/panic/OOB all degrade to hybrid). Binding keep/delete verdict pending
+real-notes ground truth (P1); kill-switch armed. Spec/plan:
+`docs/superpowers/specs/2026-06-08-r1-reranker-attach-design.md`.
 
 ### 🔒 R2 — Chunk-level embeddings — blocked on R0
 **Goal:** retire whole-note embedding; chunk notes. The `buried-fact-in-long-note` category is the

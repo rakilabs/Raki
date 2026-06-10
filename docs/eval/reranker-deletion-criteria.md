@@ -1,5 +1,10 @@
 # Reranker deletion criterion (Slice 4, D-DELETE)
 
+> **Status (2026-06-08):** Reranker is **attached-pending-validation** in production (ADR-0008) on
+> directional SciFact evidence (+0.0313 nDCG@10). This kill-switch remains the **binding** test:
+> the reranker stays only if it beats hybrid by +0.03 nDCG on ≥100 real-notes queries, else it is
+> removed.
+
 Status: OPEN — decided once real-notes ground truth exists.
 
 The cross-encoder reranker (Slice 4) was built as an eval-substrate integration test on a
