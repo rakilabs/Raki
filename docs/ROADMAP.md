@@ -64,10 +64,19 @@ R1 carries the reranker as *attach-to-validate*, not yet attached.
 real-notes ground truth (P1); kill-switch armed. Spec/plan:
 `docs/superpowers/specs/2026-06-08-r1-reranker-attach-design.md`.
 
-### 🔒 R2 — Chunk-level embeddings — blocked on R0
+### ✅ R2 — Chunk-level embeddings *(design-settled; migration P1-gated)*
 **Goal:** retire whole-note embedding; chunk notes. The `buried-fact-in-long-note` category is the
-tripwire. Chunking substrate already exists in `raki-eval`; this wires it into production indexing.
-**Exit:** measured lift on the tripwire category; prod indexing chunks notes.
+tripwire. Chunking substrate + design space + promotion gate already exist (2026-06-06 chunking spec).
+**Status:** **Design-settled.** Synthetic whole-vs-chunked baseline recorded in
+`docs/eval/chunking-baseline.md` (winning arm noted there). The production one-to-many storage
+migration + the **binding verdict** are **gated on a real-notes corpus** (chunking spec D8: +0.05
+Success@3 on the long stratum, by 2026-09-06) — *not* decidable on public data (SciFact is unstructured;
+BEIR has no open long+structured set). Spec/plan:
+`docs/superpowers/specs/2026-06-10-r2-chunking-baseline-record-design.md`.
+
+> **Cross-cutting:** both R1's reranker verdict and R2's chunking migration now wait on **real notes**,
+> whose enabler is **P1** (Track B) — making P1 the natural next critical-path slice. (P1 is scoped in
+> its own slice; the long-note stratum is defined in the 2026-06-06 chunking spec D7.)
 
 ### 🔒 R3 — Generate-stage query understanding — blocked on R2
 **Goal:** LLM query rewriting / HyDE / multi-hop feeding the recall stage (ADR-0006 stage 3).
