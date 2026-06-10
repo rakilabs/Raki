@@ -25,8 +25,8 @@ pub async fn rerank(
     });
     Ok(scored
         .iter()
+        .filter_map(|s| candidates.get(s.index).map(|(id, _)| id.clone()))
         .take(k)
-        .map(|s| candidates[s.index].0.clone())
         .collect())
 }
 
@@ -89,5 +89,36 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out, vec!["b".to_string(), "a".to_string()]);
+    }
+
+    /// Returns one in-range score and one OUT-OF-RANGE index, to prove the wrapper skips
+    /// the bad index instead of panicking on `candidates[s.index]`.
+    struct OobReranker;
+
+    #[async_trait]
+    impl Reranker for OobReranker {
+        fn locality(&self) -> Locality {
+            Locality::Local
+        }
+        fn model_id(&self) -> String {
+            "oob".to_string()
+        }
+        async fn rerank(
+            &self,
+            _query: &str,
+            _documents: &[String],
+        ) -> Result<Vec<RerankScore>, DomainError> {
+            Ok(vec![
+                RerankScore { index: 0, score: 0.9 },
+                RerankScore { index: 99, score: 0.8 }, // out of range for 1 candidate
+            ])
+        }
+    }
+
+    #[tokio::test]
+    async fn rerank_skips_out_of_range_index_without_panicking() {
+        let candidates = vec![("id0".to_string(), "doc zero".to_string())];
+        let ids = rerank(&OobReranker, "q", &candidates, 10).await.unwrap();
+        assert_eq!(ids, vec!["id0".to_string()], "OOB index skipped, in-range kept");
     }
 }
