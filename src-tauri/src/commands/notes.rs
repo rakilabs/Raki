@@ -433,4 +433,50 @@ mod tests {
             "oversized note returned, no panic"
         );
     }
+
+    /// Manual latency probe (not a gate): times the real production `search_reranked` over a
+    /// realistic vault of short notes at `POOL`, to choose an interactive pool size. The SciFact
+    /// gate measured ~24 s/query on 512-token abstracts; real notes are short, so this measures
+    /// the number that actually matters. Run: `cargo test -p raki --release rerank_latency_probe
+    /// -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore = "loads the real reranker model; manual latency probe, prints timing"]
+    async fn rerank_latency_probe() {
+        use raki_ai::FastEmbedReranker;
+        use std::time::Instant;
+
+        let owned: Vec<(String, String)> = (0..150)
+            .map(|i| {
+                (
+                    format!("Note {i}"),
+                    format!("a short personal note about topic {i}: groceries, meeting at 3pm, and a link"),
+                )
+            })
+            .collect();
+        let refs: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(t, b)| (t.as_str(), b.as_str()))
+            .collect();
+        let (repo, keyword, vectors, embedder) = index_with(&refs).await;
+        let reranker = FastEmbedReranker::try_new().expect("reranker init");
+
+        let t = Instant::now();
+        let out = search_reranked(
+            &repo,
+            &keyword,
+            &vectors,
+            &embedder as &dyn EmbeddingProvider,
+            Some(&reranker),
+            "meeting groceries topic 42",
+        )
+        .await
+        .unwrap();
+        let elapsed = t.elapsed();
+        eprintln!(
+            "[latency] search_reranked over {} notes, POOL={POOL}, returned {} in {elapsed:?}",
+            owned.len(),
+            out.len()
+        );
+        assert!(!out.is_empty());
+    }
 }

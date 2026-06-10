@@ -109,8 +109,14 @@ mod tests {
             _documents: &[String],
         ) -> Result<Vec<RerankScore>, DomainError> {
             Ok(vec![
-                RerankScore { index: 0, score: 0.9 },
-                RerankScore { index: 99, score: 0.8 }, // out of range for 1 candidate
+                RerankScore {
+                    index: 0,
+                    score: 0.9,
+                },
+                RerankScore {
+                    index: 99,
+                    score: 0.8,
+                }, // out of range for 1 candidate
             ])
         }
     }
@@ -119,6 +125,10 @@ mod tests {
     async fn rerank_skips_out_of_range_index_without_panicking() {
         let candidates = vec![("id0".to_string(), "doc zero".to_string())];
         let ids = rerank(&OobReranker, "q", &candidates, 10).await.unwrap();
-        assert_eq!(ids, vec!["id0".to_string()], "OOB index skipped, in-range kept");
+        assert_eq!(
+            ids,
+            vec!["id0".to_string()],
+            "OOB index skipped, in-range kept"
+        );
     }
 }
