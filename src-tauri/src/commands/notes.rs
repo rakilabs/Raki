@@ -25,6 +25,40 @@ fn cap_text(s: &str, max_bytes: usize) -> String {
     s[..end].to_string()
 }
 
+use std::time::Duration;
+
+use raki_domain::Reranker;
+
+/// Rerank `candidates` to top-`k`, bounded by `timeout`. Returns `Some(ids)` on success, or
+/// `None` (the caller falls back to hybrid order) on timeout or any rerank error. The forward
+/// pass already runs in `spawn_blocking` inside `FastEmbedReranker`, so this never stalls the
+/// runtime; the timeout only bounds a degenerate hung inference. `timeout` is a parameter so
+/// tests can exercise the timeout arm at 1 ms instead of waiting `RERANK_TIMEOUT`.
+async fn rerank_top_k(
+    reranker: &dyn Reranker,
+    query: &str,
+    candidates: &[(String, String)],
+    k: usize,
+    timeout: Duration,
+) -> Option<Vec<String>> {
+    match tokio::time::timeout(
+        timeout,
+        raki_retrieval::rerank(reranker, query, candidates, k),
+    )
+    .await
+    {
+        Ok(Ok(ids)) => Some(ids),
+        Ok(Err(e)) => {
+            eprintln!("rerank failed ({e}); falling back to hybrid order");
+            None
+        }
+        Err(_elapsed) => {
+            eprintln!("rerank timed out after {timeout:?}; falling back to hybrid order");
+            None
+        }
+    }
+}
+
 /// Boundary validation shared by create + update (review M1). Returns the trimmed title
 /// so callers share a single source of truth for sanitization.
 fn validate(title: &str, body: &str) -> Result<String, AppError> {
@@ -145,5 +179,58 @@ mod tests {
         let out = cap_text(s, 4);
         assert_eq!(out, "€");
         assert!(out.len() <= 4);
+    }
+
+    use async_trait::async_trait;
+    use raki_ai::FakeReranker;
+    use raki_domain::{DomainError, Locality, RerankScore, Reranker};
+    use std::time::Duration;
+
+    struct ErrReranker;
+    #[async_trait]
+    impl Reranker for ErrReranker {
+        fn locality(&self) -> Locality { Locality::Local }
+        fn model_id(&self) -> String { "err".into() }
+        async fn rerank(&self, _q: &str, _d: &[String]) -> Result<Vec<RerankScore>, DomainError> {
+            Err(DomainError::Provider("boom".into()))
+        }
+    }
+
+    struct HangReranker;
+    #[async_trait]
+    impl Reranker for HangReranker {
+        fn locality(&self) -> Locality { Locality::Local }
+        fn model_id(&self) -> String { "hang".into() }
+        async fn rerank(&self, _q: &str, _d: &[String]) -> Result<Vec<RerankScore>, DomainError> {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            Ok(Vec::new())
+        }
+    }
+
+    fn candidates() -> Vec<(String, String)> {
+        vec![
+            ("a".to_string(), "red apple fruit".to_string()),
+            ("b".to_string(), "blue ocean water".to_string()),
+        ]
+    }
+
+    #[tokio::test]
+    async fn rerank_top_k_returns_some_on_success() {
+        let out = rerank_top_k(&FakeReranker, "apple", &candidates(), 10, Duration::from_secs(5)).await;
+        let ids = out.expect("FakeReranker succeeds → Some");
+        assert_eq!(ids.first().map(String::as_str), Some("a"), "apple doc ranked first");
+    }
+
+    #[tokio::test]
+    async fn rerank_top_k_returns_none_on_error() {
+        let out = rerank_top_k(&ErrReranker, "apple", &candidates(), 10, Duration::from_secs(5)).await;
+        assert!(out.is_none(), "rerank error → None (caller uses hybrid order)");
+    }
+
+    #[tokio::test]
+    async fn rerank_top_k_returns_none_on_timeout() {
+        // 1 ms budget against a 60 s reranker → timeout fallback, fast.
+        let out = rerank_top_k(&HangReranker, "apple", &candidates(), 10, Duration::from_millis(1)).await;
+        assert!(out.is_none(), "rerank timeout → None (caller uses hybrid order)");
     }
 }

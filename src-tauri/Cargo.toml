@@ -60,3 +60,6 @@ raki-memory = { workspace = true }
 raki-generate = { workspace = true }
 tokio = { workspace = true }
 dotenvy = "0.15"
+
+[dev-dependencies]
+async-trait.workspace = true
