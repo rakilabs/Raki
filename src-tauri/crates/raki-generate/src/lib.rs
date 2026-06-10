@@ -115,15 +115,17 @@ pub async fn send_answer(
     let context_ids: std::collections::HashSet<String> =
         ctx.egress.source_ids.iter().map(|s| s.0.clone()).collect();
     let (state, text, cited_ids) = evaluate(&completion.text, &context_ids);
-    deps.gate
-        .set_grounded(&log_id, state.is_grounded())
-        .await
-        .map_err(GenerateError::Domain)?;
+    if let Some(id) = log_id {
+        deps.gate
+            .set_grounded(&id, state.is_grounded())
+            .await
+            .map_err(GenerateError::Domain)?;
+    }
     Ok(Answer {
         state,
         text,
         cited_ids,
-        egress_log_id: Some(log_id),
+        egress_log_id: log_id,
     })
 }
 
@@ -181,7 +183,7 @@ mod flow_tests {
     use raki_domain::testing::FixedClock;
     use raki_domain::{
         EgressDenied, EgressLog, EgressLogId, EgressRecord, EgressSettings, Embedding, KeywordHit,
-        Mode, Note, NoteId, VectorHit,
+        Note, NoteId, VectorHit,
     };
 
     // --- fakes (impl domain ports) ---
@@ -289,17 +291,11 @@ mod flow_tests {
             Ok(vec![])
         }
     }
-    struct CloudSettings;
+    struct ConsentedSettings;
     #[async_trait]
-    impl EgressSettings for CloudSettings {
-        async fn mode(&self) -> Result<Mode, DomainError> {
-            Ok(Mode::CloudAllowed)
-        }
+    impl EgressSettings for ConsentedSettings {
         async fn consented(&self) -> Result<HashSet<String>, DomainError> {
             Ok(HashSet::from(["kimi".to_string()]))
-        }
-        async fn set_mode(&self, _: Mode) -> Result<(), DomainError> {
-            Ok(())
         }
         async fn grant(&self, _: &str) -> Result<(), DomainError> {
             Ok(())
@@ -312,7 +308,7 @@ mod flow_tests {
     fn gate(inner: Arc<dyn raki_domain::LlmProvider>, log: Arc<SpyLog>) -> GatedLlmProvider {
         GatedLlmProvider::new(
             inner,
-            Arc::new(CloudSettings),
+            Arc::new(ConsentedSettings),
             log,
             Arc::new(FixedClock(1000)),
         )
@@ -337,28 +333,19 @@ mod flow_tests {
     }
 
     struct ToggleSettings {
-        mode: Mutex<Mode>,
         consented: Mutex<HashSet<String>>,
     }
     impl Default for ToggleSettings {
         fn default() -> Self {
             Self {
-                mode: Mutex::new(Mode::LocalOnly),
                 consented: Mutex::new(HashSet::new()),
             }
         }
     }
     #[async_trait]
     impl EgressSettings for ToggleSettings {
-        async fn mode(&self) -> Result<Mode, DomainError> {
-            Ok(*self.mode.lock().unwrap())
-        }
         async fn consented(&self) -> Result<HashSet<String>, DomainError> {
             Ok(self.consented.lock().unwrap().clone())
-        }
-        async fn set_mode(&self, m: Mode) -> Result<(), DomainError> {
-            *self.mode.lock().unwrap() = m;
-            Ok(())
         }
         async fn grant(&self, p: &str) -> Result<(), DomainError> {
             self.consented.lock().unwrap().insert(p.to_string());
@@ -478,8 +465,7 @@ mod flow_tests {
         let fake = Arc::new(FakeLlmProvider::ok(&reply));
         let log = Arc::new(SpyLog::default());
         let settings = Arc::new(ToggleSettings::default());
-        // Start in LocalOnly mode → gate denies.
-        *settings.mode.lock().unwrap() = Mode::LocalOnly;
+        // Start with no consent → gate denies.
         let g = toggle_gate(fake.clone(), settings.clone(), log.clone());
         let note = OneNote(nid);
         let vec = OneVector(nid.to_string());
@@ -489,19 +475,18 @@ mod flow_tests {
             panic!("expected some context");
         };
 
-        // First send: denied because LocalOnly.
+        // First send: denied because no consent.
         let err = send_answer(&ctx, "how do I pay?", &deps).await.unwrap_err();
         assert!(
             matches!(
                 err,
-                GenerateError::Egress(EgressError::Denied(EgressDenied::LocalOnlyMode))
+                GenerateError::Egress(EgressError::Denied(EgressDenied::ConsentRequired))
             ),
-            "expected LocalOnlyMode denial, got {err:?}"
+            "expected ConsentRequired denial, got {err:?}"
         );
         assert_eq!(fake.call_count(), 0, "no send while denied");
 
         // Grant consent.
-        settings.set_mode(Mode::CloudAllowed).await.unwrap();
         settings.grant("kimi").await.unwrap();
 
         // Second send: succeeds now.

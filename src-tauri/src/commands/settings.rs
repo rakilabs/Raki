@@ -2,8 +2,6 @@
 
 use tauri::State;
 
-use raki_domain::Mode;
-
 use crate::dto::{EgressLogEntryDto, EgressSettingsDto};
 use crate::error::AppError;
 use crate::state::AppState;
@@ -12,31 +10,10 @@ use crate::state::AppState;
 pub async fn get_egress_settings(
     state: State<'_, AppState>,
 ) -> Result<EgressSettingsDto, AppError> {
-    let mode = match state.settings.mode().await? {
-        Mode::LocalOnly => "local_only",
-        Mode::CloudAllowed => "cloud_allowed",
-    };
     let consented: Vec<String> = state.settings.consented().await?.into_iter().collect();
     Ok(EgressSettingsDto {
-        mode: mode.into(),
         consented_providers: consented,
     })
-}
-
-#[tauri::command]
-pub async fn set_egress_mode(state: State<'_, AppState>, mode: String) -> Result<(), AppError> {
-    let m = match mode.as_str() {
-        "local_only" => Mode::LocalOnly,
-        "cloud_allowed" => Mode::CloudAllowed,
-        _ => {
-            return Err(AppError {
-                kind: "validation_error".into(),
-                message: "mode must be local_only or cloud_allowed".into(),
-            })
-        }
-    };
-    state.settings.set_mode(m).await?;
-    Ok(())
 }
 
 #[tauri::command]

@@ -30,7 +30,6 @@ use crate::commands::notes::{
 use crate::commands::qa::answer_question;
 use crate::commands::settings::{
     get_egress_settings, grant_provider_consent, list_egress_log, revoke_provider_consent,
-    set_egress_mode,
 };
 use crate::indexing::IndexingService;
 use crate::state::AppState;
@@ -158,7 +157,6 @@ pub fn run() {
             list_trashed_notes,
             answer_question,
             get_egress_settings,
-            set_egress_mode,
             grant_provider_consent,
             revoke_provider_consent,
             list_egress_log,

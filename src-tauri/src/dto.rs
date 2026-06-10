@@ -88,7 +88,6 @@ pub enum AnswerOutcome {
 #[derive(Debug, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/shared/ipc/bindings/")]
 pub struct EgressSettingsDto {
-    pub mode: String,
     pub consented_providers: Vec<String>,
 }
 

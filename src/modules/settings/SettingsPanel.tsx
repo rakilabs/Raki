@@ -11,11 +11,6 @@ export function SettingsPanel(props: { onClose: () => void }) {
     queryFn: () => settingsApi.getEgressSettings(),
   }));
 
-  const setMode = createMutation(() => ({
-    mutationFn: (mode: string) => settingsApi.setEgressMode(mode),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.egress }),
-  }));
-
   const grant = createMutation(() => ({
     mutationFn: (provider: string) => settingsApi.grantConsent(provider),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.egress }),
@@ -50,29 +45,12 @@ export function SettingsPanel(props: { onClose: () => void }) {
 
         <Show when={activeTab() === "privacy"}>
           <section>
-            <h3>Egress Mode</h3>
-            <label>
-              <input
-                type="radio"
-                name="egress-mode"
-                value="local_only"
-                checked={settings.data?.mode === "local_only"}
-                onChange={() => setMode.mutate("local_only")}
-              />
-              Local only — cloud calls disabled
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="egress-mode"
-                value="cloud_allowed"
-                checked={settings.data?.mode === "cloud_allowed"}
-                onChange={() => setMode.mutate("cloud_allowed")}
-              />
-              Cloud allowed — with per-provider consent
-            </label>
+            <p>
+              Local providers (e.g., Ollama) run on your device and need no consent.
+              Cloud providers require your explicit approval before each can be used.
+            </p>
 
-            <h3>Provider Consent</h3>
+            <h3>Cloud Provider Consent</h3>
             <Show when={settings.data}>
               {(s) => (
                 <>

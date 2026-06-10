@@ -8,7 +8,6 @@ export const settingsKeys = {
 
 export const settingsApi = {
   getEgressSettings: () => commands.getEgressSettings(),
-  setEgressMode: (mode: string) => commands.setEgressMode(mode),
   grantConsent: (provider: string) => commands.grantProviderConsent(provider),
   revokeConsent: (provider: string) => commands.revokeProviderConsent(provider),
   listEgressLog: (limit: number) => commands.listEgressLog(limit),

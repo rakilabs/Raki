@@ -20,7 +20,6 @@ export const commands = {
   listTrashedNotes: () => invoke<NoteDto[]>("list_trashed_notes"),
   answerQuestion: (query: string) => invoke<AnswerOutcome>("answer_question", { query }),
   getEgressSettings: () => invoke<EgressSettingsDto>("get_egress_settings"),
-  setEgressMode: (mode: string) => invoke<null>("set_egress_mode", { mode }),
   grantProviderConsent: (provider: string) => invoke<null>("grant_provider_consent", { provider }),
   revokeProviderConsent: (provider: string) => invoke<null>("revoke_provider_consent", { provider }),
   listEgressLog: (limit: number) => invoke<EgressLogEntryDto[]>("list_egress_log", { limit }),

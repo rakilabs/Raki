@@ -491,8 +491,10 @@ pub async fn assemble_context(req: &ContextRequest, deps: &MemoryDeps) -> Result
 
 ### Privacy & egress (because cloud providers are allowed)
 
-- Every model call goes through `raki-ai`, which enforces an **egress policy**: a **local-only mode** (hard
-  network off), per-provider **consent**, and **logging** of what left the device and when.
+- Every model call goes through `raki-ai`, which enforces a **locality-aware egress policy**:
+  **local providers** (Ollama, etc.) run on-device and need no consent; **cloud providers** (Kimi,
+  Claude, OpenAI, etc.) require per-provider **consent**, and every cloud call is **logged** so the
+  user can always answer "what left my device?".
 - A cloud completion **must** carry an `AssembledContext` whose `egress` was approved by policy. No ad-hoc
   `reqwest` calls to model APIs anywhere outside `raki-ai`.
 

@@ -82,18 +82,9 @@ pub struct EgressRecord {
     pub success: bool,
 }
 
-/// Master egress switch.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mode {
-    LocalOnly,
-    CloudAllowed,
-}
-
 /// Why an egress was refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum EgressDenied {
-    #[error("local-only mode: cloud calls are disabled")]
-    LocalOnlyMode,
     #[error("consent required for this provider")]
     ConsentRequired,
     #[error("empty context: nothing to send")]
@@ -121,12 +112,10 @@ pub trait EgressLog: Send + Sync {
     async fn list_recent(&self, limit: usize) -> Result<Vec<EgressRecord>, DomainError>;
 }
 
-/// Live-read egress settings: the master mode + per-provider consent. Read every call (no caching).
+/// Live-read egress settings: per-provider consent only. Read every call (no caching).
 #[async_trait]
 pub trait EgressSettings: Send + Sync {
-    async fn mode(&self) -> Result<Mode, DomainError>;
     async fn consented(&self) -> Result<HashSet<String>, DomainError>;
-    async fn set_mode(&self, mode: Mode) -> Result<(), DomainError>;
     async fn grant(&self, provider: &str) -> Result<(), DomainError>;
     async fn revoke(&self, provider: &str) -> Result<(), DomainError>;
 }

@@ -8,7 +8,7 @@ mod messages;
 mod rerank;
 pub mod testing;
 
-pub use egress::{EgressPolicy, GatedLlmProvider};
+pub use egress::GatedLlmProvider;
 pub use fake::FakeEmbeddingProvider;
 pub use fake_rerank::FakeReranker;
 pub use fastembed::FastEmbedProvider;

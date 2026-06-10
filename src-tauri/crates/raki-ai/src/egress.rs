@@ -6,34 +6,22 @@ use std::sync::Arc;
 
 use raki_domain::{
     Clock, Completion, CompletionRequest, DomainError, EgressDecision, EgressDenied, EgressError,
-    EgressLog, EgressLogId, EgressRecord, EgressSettings, LlmProvider, Mode,
+    EgressLog, EgressLogId, EgressRecord, EgressSettings, LlmProvider, Locality,
 };
 
-/// A per-call snapshot of the egress settings. Built fresh from `EgressSettings` on every call —
-/// never cached — so a consent change takes effect immediately.
-pub struct EgressPolicy {
-    pub mode: Mode,
-    pub consented: HashSet<String>,
-}
-
-/// Decide whether `decision` may leave the device under `policy`. Pure. `pub(crate)` — it is an
-/// implementation detail of the gate, exposed only to this crate's tests.
+/// Decide whether `decision` may leave the device under the consented set. Pure. `pub(crate)` —
+/// it is an implementation detail of the gate, exposed only to this crate's tests.
 pub(crate) fn approve(
     decision: &EgressDecision,
-    policy: &EgressPolicy,
+    consented: &HashSet<String>,
 ) -> Result<(), EgressDenied> {
     if decision.is_empty() {
         return Err(EgressDenied::EmptyContext);
     }
-    match policy.mode {
-        Mode::LocalOnly => Err(EgressDenied::LocalOnlyMode),
-        Mode::CloudAllowed => {
-            if policy.consented.contains(&decision.provider) {
-                Ok(())
-            } else {
-                Err(EgressDenied::ConsentRequired)
-            }
-        }
+    if consented.contains(&decision.provider) {
+        Ok(())
+    } else {
+        Err(EgressDenied::ConsentRequired)
     }
 }
 
@@ -42,11 +30,8 @@ mod tests {
     use super::*;
     use raki_domain::SourceId;
 
-    fn policy(mode: Mode, consented: &[&str]) -> EgressPolicy {
-        EgressPolicy {
-            mode,
-            consented: consented.iter().map(|s| s.to_string()).collect(),
-        }
+    fn consented(providers: &[&str]) -> HashSet<String> {
+        providers.iter().map(|s| s.to_string()).collect()
     }
     fn decision(provider: &str, ids: &[&str]) -> EgressDecision {
         EgressDecision {
@@ -58,20 +43,11 @@ mod tests {
     }
 
     #[test]
-    fn empty_context_is_refused_regardless_of_mode() {
+    fn empty_context_is_refused_regardless_of_consent() {
         let d = decision("kimi", &[]);
         assert_eq!(
-            approve(&d, &policy(Mode::CloudAllowed, &["kimi"])),
+            approve(&d, &consented(&["kimi"])),
             Err(EgressDenied::EmptyContext)
-        );
-    }
-
-    #[test]
-    fn local_only_refuses_everything() {
-        let d = decision("kimi", &["a"]);
-        assert_eq!(
-            approve(&d, &policy(Mode::LocalOnly, &["kimi"])),
-            Err(EgressDenied::LocalOnlyMode)
         );
     }
 
@@ -79,10 +55,10 @@ mod tests {
     fn cloud_requires_provider_consent() {
         let d = decision("kimi", &["a"]);
         assert_eq!(
-            approve(&d, &policy(Mode::CloudAllowed, &[])),
+            approve(&d, &consented(&[])),
             Err(EgressDenied::ConsentRequired)
         );
-        assert_eq!(approve(&d, &policy(Mode::CloudAllowed, &["kimi"])), Ok(()));
+        assert_eq!(approve(&d, &consented(&["kimi"])), Ok(()));
     }
 }
 
@@ -114,15 +90,27 @@ impl GatedLlmProvider {
         }
     }
 
+    /// Complete via the inner provider, enforcing locality-aware policy:
+    /// - `Locality::Local` → always allowed, no log row (nothing left the device).
+    /// - `Locality::Cloud` → requires provider consent; on approval, call + log; on denial,
+    ///   return `EgressError::Denied` with no send and no log row.
     pub async fn complete_gated(
         &self,
         egress: &EgressDecision,
         req: CompletionRequest,
-    ) -> Result<(Completion, EgressLogId), EgressError> {
-        // Live snapshot — never cached. Run the two reads concurrently.
-        let (mode, consented) = tokio::try_join!(self.settings.mode(), self.settings.consented())?;
-        let policy = EgressPolicy { mode, consented };
-        approve(egress, &policy)?; // EgressDenied → EgressError::Denied; no send, no log row.
+    ) -> Result<(Completion, Option<EgressLogId>), EgressError> {
+        if self.inner.locality() == Locality::Local {
+            let completion = self
+                .inner
+                .complete(req)
+                .await
+                .map_err(EgressError::Completion)?;
+            return Ok((completion, None));
+        }
+
+        // Cloud path: live consent snapshot, never cached.
+        let consented = self.settings.consented().await?;
+        approve(egress, &consented)?; // EgressDenied → EgressError::Denied; no send, no log row.
 
         let id = EgressLogId::new();
         let result = self.inner.complete(req).await;
@@ -138,7 +126,7 @@ impl GatedLlmProvider {
             return Err(EgressError::Audit(e.to_string()));
         }
         let completion = result.map_err(EgressError::Completion)?;
-        Ok((completion, id))
+        Ok((completion, Some(id)))
     }
 
     /// Attach the groundedness verdict to a prior gated completion's log row.
@@ -151,9 +139,7 @@ impl GatedLlmProvider {
 mod gate_tests {
     use super::*;
     use crate::testing::FakeLlmProvider;
-    use raki_domain::{
-        testing::FixedClock, DomainError, EgressRecord, EgressSettings, Mode, SourceId,
-    };
+    use raki_domain::{testing::FixedClock, DomainError, EgressRecord, EgressSettings, SourceId};
     use std::collections::HashSet;
     use std::sync::Mutex;
 
@@ -199,19 +185,12 @@ mod gate_tests {
     }
 
     struct FakeSettings {
-        mode: Mode,
         consented: Vec<String>,
     }
     #[async_trait::async_trait]
     impl EgressSettings for FakeSettings {
-        async fn mode(&self) -> Result<Mode, DomainError> {
-            Ok(self.mode)
-        }
         async fn consented(&self) -> Result<HashSet<String>, DomainError> {
             Ok(self.consented.iter().cloned().collect())
-        }
-        async fn set_mode(&self, _m: Mode) -> Result<(), DomainError> {
-            Ok(())
         }
         async fn grant(&self, _p: &str) -> Result<(), DomainError> {
             Ok(())
@@ -230,16 +209,10 @@ mod gate_tests {
         }
     }
 
-    fn gate(
-        inner: Arc<dyn LlmProvider>,
-        log: Arc<SpyLog>,
-        mode: Mode,
-        consented: &[&str],
-    ) -> GatedLlmProvider {
+    fn gate(inner: Arc<dyn LlmProvider>, log: Arc<SpyLog>, consented: &[&str]) -> GatedLlmProvider {
         GatedLlmProvider::new(
             inner,
             Arc::new(FakeSettings {
-                mode,
                 consented: consented.iter().map(|s| s.to_string()).collect(),
             }),
             log,
@@ -248,10 +221,33 @@ mod gate_tests {
     }
 
     #[tokio::test]
-    async fn local_only_denies_without_calling_or_logging() {
-        let fake = Arc::new(FakeLlmProvider::ok("hi"));
+    async fn local_provider_bypasses_consent_and_does_not_log() {
+        // A provider whose locality() == Local should always succeed, never log.
+        let fake = Arc::new(FakeLlmProvider::ok("hi").with_locality(Locality::Local));
         let log = Arc::new(SpyLog::default());
-        let g = gate(fake.clone(), log.clone(), Mode::LocalOnly, &["kimi"]);
+        let g = gate(fake.clone(), log.clone(), &[]); // no consents
+        let (out, id) = g
+            .complete_gated(
+                &decision(&["a"]),
+                CompletionRequest {
+                    system: None,
+                    prompt: "q".into(),
+                    max_tokens: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.text, "hi");
+        assert_eq!(id, None, "local provider returns no log id");
+        assert_eq!(fake.call_count(), 1, "inner was called");
+        assert_eq!(log.rows.lock().unwrap().len(), 0, "no log row for local");
+    }
+
+    #[tokio::test]
+    async fn cloud_unconsented_denies_without_calling_or_logging() {
+        let fake = Arc::new(FakeLlmProvider::ok("hi")); // default locality = Cloud
+        let log = Arc::new(SpyLog::default());
+        let g = gate(fake.clone(), log.clone(), &[]); // no consents
         let err = g
             .complete_gated(
                 &decision(&["a"]),
@@ -263,7 +259,10 @@ mod gate_tests {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, EgressError::Denied(_)));
+        assert!(
+            matches!(err, EgressError::Denied(EgressDenied::ConsentRequired)),
+            "got {err:?}"
+        );
         assert_eq!(fake.call_count(), 0, "no send");
         assert_eq!(log.rows.lock().unwrap().len(), 0, "no log row");
     }
@@ -272,7 +271,7 @@ mod gate_tests {
     async fn consented_call_sends_once_and_logs_success() {
         let fake = Arc::new(FakeLlmProvider::ok("answer"));
         let log = Arc::new(SpyLog::default());
-        let g = gate(fake.clone(), log.clone(), Mode::CloudAllowed, &["kimi"]);
+        let g = gate(fake.clone(), log.clone(), &["kimi"]);
         let (out, id) = g
             .complete_gated(
                 &decision(&["a"]),
@@ -285,6 +284,7 @@ mod gate_tests {
             .await
             .unwrap();
         assert_eq!(out.text, "answer");
+        let id = id.expect("cloud call returns a log id");
         assert_eq!(fake.call_count(), 1);
         let rows = log.rows.lock().unwrap();
         assert_eq!(rows.len(), 1);
@@ -297,7 +297,7 @@ mod gate_tests {
     async fn inner_failure_still_logs_one_record_with_success_false() {
         let fake = Arc::new(FakeLlmProvider::failing("network down"));
         let log = Arc::new(SpyLog::default());
-        let g = gate(fake.clone(), log.clone(), Mode::CloudAllowed, &["kimi"]);
+        let g = gate(fake.clone(), log.clone(), &["kimi"]);
         let err = g
             .complete_gated(
                 &decision(&["a"]),
@@ -319,7 +319,7 @@ mod gate_tests {
     async fn empty_egress_is_refused_before_any_call() {
         let fake = Arc::new(FakeLlmProvider::ok("hi"));
         let log = Arc::new(SpyLog::default());
-        let g = gate(fake.clone(), log.clone(), Mode::CloudAllowed, &["kimi"]);
+        let g = gate(fake.clone(), log.clone(), &["kimi"]);
         let err = g
             .complete_gated(
                 &decision(&[]),
@@ -347,7 +347,6 @@ mod gate_tests {
         let g = GatedLlmProvider::new(
             fake.clone(),
             Arc::new(FakeSettings {
-                mode: Mode::CloudAllowed,
                 consented: vec!["kimi".to_string()],
             }),
             Arc::new(FailingLog),

@@ -1,11 +1,10 @@
 //! SQLite adapters for the egress audit log and the consent/mode settings.
 
 use async_trait::async_trait;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 
 use raki_domain::{
-    DomainError, EgressDecision, EgressLog, EgressLogId, EgressRecord, EgressSettings, Mode,
-    SourceId,
+    DomainError, EgressDecision, EgressLog, EgressLogId, EgressRecord, EgressSettings, SourceId,
 };
 
 use crate::db::Database;
@@ -108,28 +107,8 @@ impl EgressLog for SqliteEgressLog {
     }
 }
 
-const EGRESS_MODE_KEY: &str = "egress_mode";
-
 #[async_trait]
 impl EgressSettings for SqliteEgressSettings {
-    async fn mode(&self) -> Result<Mode, DomainError> {
-        let v: Option<String> = self
-            .db
-            .call(move |c| {
-                c.query_row(
-                    "SELECT value FROM app_settings WHERE key = ?1",
-                    params![EGRESS_MODE_KEY],
-                    |r| r.get(0),
-                )
-                .optional()
-            })
-            .await?;
-        Ok(match v.as_deref() {
-            Some("cloud") => Mode::CloudAllowed,
-            _ => Mode::LocalOnly, // default + any unknown value ⇒ safe
-        })
-    }
-
     async fn consented(&self) -> Result<std::collections::HashSet<String>, DomainError> {
         self.db
             .call(|c| {
@@ -138,23 +117,6 @@ impl EgressSettings for SqliteEgressSettings {
                     .query_map([], |r| r.get::<_, String>(0))?
                     .collect::<rusqlite::Result<std::collections::HashSet<String>>>()?;
                 Ok(rows)
-            })
-            .await
-    }
-
-    async fn set_mode(&self, mode: Mode) -> Result<(), DomainError> {
-        let value = match mode {
-            Mode::LocalOnly => "local",
-            Mode::CloudAllowed => "cloud",
-        };
-        self.db
-            .call(move |c| {
-                c.execute(
-                    "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
-                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                    params![EGRESS_MODE_KEY, value],
-                )?;
-                Ok(())
             })
             .await
     }
@@ -246,13 +208,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn settings_default_local_only_then_grant_and_revoke() {
+    async fn settings_grant_and_revoke_consent() {
         let db = Database::open_in_memory().unwrap();
         let s = SqliteEgressSettings::new(db.clone());
-        assert_eq!(s.mode().await.unwrap(), Mode::LocalOnly); // default when unset
         assert!(s.consented().await.unwrap().is_empty());
-        s.set_mode(Mode::CloudAllowed).await.unwrap();
-        assert_eq!(s.mode().await.unwrap(), Mode::CloudAllowed);
         s.grant("kimi").await.unwrap();
         assert_eq!(
             s.consented().await.unwrap(),

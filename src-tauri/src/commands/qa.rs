@@ -67,7 +67,7 @@ pub async fn answer_question(
             })
         }
         Err(GenerateError::Egress(EgressError::Denied(
-            raki_domain::EgressDenied::LocalOnlyMode | raki_domain::EgressDenied::ConsentRequired,
+            raki_domain::EgressDenied::ConsentRequired,
         ))) => Ok(AnswerOutcome::NeedsConsent { preview }),
         Err(e) => Err(AppError::from(e)),
     }

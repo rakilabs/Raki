@@ -31,6 +31,19 @@ impl LlmProvider for SpyLlm {
     }
 }
 
+struct LocalSpyLlm;
+#[async_trait::async_trait]
+impl LlmProvider for LocalSpyLlm {
+    fn locality(&self) -> Locality {
+        Locality::Local
+    }
+    async fn complete(&self, _req: CompletionRequest) -> Result<Completion, DomainError> {
+        Ok(Completion {
+            text: "local".into(),
+        })
+    }
+}
+
 async fn setup() -> (
     SqliteNoteRepository,
     Arc<dyn EgressSettings>,
@@ -101,23 +114,10 @@ async fn note_lifecycle_create_delete_restore() {
 }
 
 #[tokio::test]
-async fn settings_default_local_and_cycle_mode_and_consent() {
+async fn settings_consent_grant_and_revoke() {
     let (_notes, settings, _log, _clock) = setup().await;
 
-    // Default mode is local-only
-    assert_eq!(settings.mode().await.unwrap(), raki_domain::Mode::LocalOnly);
-
-    // Switch to cloud allowed
-    settings
-        .set_mode(raki_domain::Mode::CloudAllowed)
-        .await
-        .unwrap();
-    assert_eq!(
-        settings.mode().await.unwrap(),
-        raki_domain::Mode::CloudAllowed
-    );
-
-    // No consents yet
+    // No consents initially
     let consented = settings.consented().await.unwrap();
     assert!(consented.is_empty(), "no consents initially");
 
@@ -133,18 +133,14 @@ async fn settings_default_local_and_cycle_mode_and_consent() {
 }
 
 #[tokio::test]
-async fn egress_log_records_and_lists() {
+async fn egress_log_records_cloud_calls_only() {
     let (_notes, settings, log, clock) = setup().await;
 
     // Initially empty
     let empty = log.list_recent(10).await.unwrap();
     assert!(empty.is_empty(), "no log entries initially");
 
-    // Build a gated provider and make a consented call
-    settings
-        .set_mode(raki_domain::Mode::CloudAllowed)
-        .await
-        .unwrap();
+    // Build a gated cloud provider and make a consented call
     settings.grant("kimi").await.unwrap();
 
     let inner: Arc<dyn LlmProvider> = Arc::new(SpyLlm);
@@ -162,7 +158,7 @@ async fn egress_log_records_and_lists() {
         "test",
     );
 
-    let _ = gate
+    let (_, id) = gate
         .complete_gated(
             &ctx.egress,
             CompletionRequest {
@@ -171,7 +167,10 @@ async fn egress_log_records_and_lists() {
                 max_tokens: None,
             },
         )
-        .await;
+        .await
+        .unwrap();
+
+    assert!(id.is_some(), "cloud call returns a log id");
 
     // Now there should be a log entry
     let entries = log.list_recent(10).await.unwrap();
@@ -179,4 +178,39 @@ async fn egress_log_records_and_lists() {
     let rec = &entries[0];
     assert_eq!(rec.decision.provider, "kimi");
     assert!(rec.success, "spy llm succeeds");
+}
+
+#[tokio::test]
+async fn local_provider_bypasses_log_and_never_records() {
+    let (_notes, settings, log, clock) = setup().await;
+
+    let inner: Arc<dyn LlmProvider> = Arc::new(LocalSpyLlm);
+    let gate = GatedLlmProvider::new(inner, settings, log.clone(), clock.clone());
+
+    let ctx = raki_memory::assemble_context(
+        &[raki_memory::Candidate {
+            source_id: "c1".into(),
+            text: "hello world".into(),
+            score: 1.0,
+        }],
+        100,
+        "ollama",
+        "llama3",
+    );
+
+    let (_, id) = gate
+        .complete_gated(
+            &ctx.egress,
+            CompletionRequest {
+                system: None,
+                prompt: "hi".into(),
+                max_tokens: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(id, None, "local provider returns no log id");
+    let entries = log.list_recent(10).await.unwrap();
+    assert!(entries.is_empty(), "no log entries for local provider");
 }
