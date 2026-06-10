@@ -42,16 +42,22 @@ fails. The real-data tier (faithful, from dogfooding) matures in parallel via **
 **Status:** ✅ Done. SciFact tier implemented: `raki-eval/src/benchmark.rs` (BEIR loader + aggregate IR
 scorer), `bench` binary (`--write` gated), `#[ignore] benchmark_gate` (vector floor + reranker
 plausibility). Spec: `docs/superpowers/specs/2026-06-08-r0-scifact-benchmark-tier-design.md`.
-Plan: `docs/superpowers/plans/2026-06-08-r0-scifact-benchmark-tier.md`. Full baseline pending
-`cargo run -p raki-eval --bin bench -- --write`.
+Plan: `docs/superpowers/plans/2026-06-08-r0-scifact-benchmark-tier.md`.
+**Baseline recorded** (`docs/eval/scifact-baseline.md`, 300 queries, k=10): vector nDCG@10 **0.7127**
+(calibrated vs published bge-small ≈0.65), reranked **0.7440**. The bi-encoder does not catastrophically
+fail on SciFact, but the reranker shows measurable lift — the corpus serves R1.
 
 ### ⬜ R1 — Reranker decision *(precision lever)* — unblocked by R0
 **Goal:** re-measure `reranked` vs `hybrid` on the failing corpus → **attach** the cross-encoder into
 production `search_notes` (+ `AppState` wiring) **or delete** it per the committed kill-switch
 (`docs/eval/reranker-deletion-criteria.md`: +0.03 nDCG ⇒ attach, else remove).
 **Exit:** an honest measured outcome, wired or removed; eval gate reflects it.
-**Note:** Smoke-test delta on 100-doc subset was +0.0566 nDCG@10 (directional toward attach), but
-binding verdict requires the full 5K-doc baseline + real-notes ground truth.
+**Note:** Full 5K-doc SciFact baseline: `reranked − hybrid` = **+0.0313 nDCG@10** (also +0.0285
+Recall@10, +0.0319 MAP) — lift consistent across all three metrics, directionally toward **attach**.
+(At k=10 `hybrid ≡ vector` — vector saturates the top-10 window — so this is also `reranked − vector`.)
+The earlier 100-doc smoke test read +0.0566; the full corpus is the honest, harder number. This is
+domain-shifted evidence per ADR-0007 — the binding +0.03 verdict is on **real-notes** ground truth, so
+R1 carries the reranker as *attach-to-validate*, not yet attached.
 
 ### 🔒 R2 — Chunk-level embeddings — blocked on R0
 **Goal:** retire whole-note embedding; chunk notes. The `buried-fact-in-long-note` category is the
