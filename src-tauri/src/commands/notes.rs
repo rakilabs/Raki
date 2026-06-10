@@ -11,6 +11,20 @@ use crate::state::AppState;
 const MAX_TITLE_CHARS: usize = 512;
 const MAX_BODY_BYTES: usize = 256 * 1024;
 
+/// Truncate `s` to at most `max_bytes`, backing off to the nearest char boundary so a
+/// multi-byte UTF-8 character is never split. Bounds per-search rerank memory; the
+/// cross-encoder only consumes ~512 tokens, so nothing it would read is lost.
+fn cap_text(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
+}
+
 /// Boundary validation shared by create + update (review M1). Returns the trimmed title
 /// so callers share a single source of truth for sanitization.
 fn validate(title: &str, body: &str) -> Result<String, AppError> {
@@ -106,4 +120,30 @@ pub async fn update_note(
     }
     state.index.trigger();
     Ok(NoteDto::from(edited))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cap_text_passes_short_strings_through() {
+        assert_eq!(cap_text("hello", 4096), "hello");
+    }
+
+    #[test]
+    fn cap_text_truncates_long_ascii_to_limit() {
+        let s = "a".repeat(5000);
+        let out = cap_text(&s, 4096);
+        assert_eq!(out.len(), 4096);
+    }
+
+    #[test]
+    fn cap_text_never_splits_a_utf8_char() {
+        // '€' is 3 bytes; capping at 4 bytes must back off to the 3-byte boundary.
+        let s = "€€"; // 6 bytes
+        let out = cap_text(s, 4);
+        assert_eq!(out, "€");
+        assert!(out.len() <= 4);
+    }
 }
