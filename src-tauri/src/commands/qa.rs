@@ -2,7 +2,7 @@
 
 use tauri::State;
 
-use raki_domain::{EgressError, Mode};
+use raki_domain::EgressError;
 use raki_generate::{assemble_for, send_answer, GenerateError};
 
 use crate::dto::{AnswerOutcome, CitedNote, EgressPreviewDto};
@@ -71,26 +71,4 @@ pub async fn answer_question(
         ))) => Ok(AnswerOutcome::NeedsConsent { preview }),
         Err(e) => Err(AppError::from(e)),
     }
-}
-
-#[tauri::command]
-pub async fn grant_cloud_consent(
-    state: State<'_, AppState>,
-    provider: String,
-) -> Result<(), AppError> {
-    state.settings.set_mode(Mode::CloudAllowed).await?;
-    state.settings.grant(&provider).await?;
-    Ok(())
-}
-
-/// Revoking the provider is sufficient to block egress: `GatedLlmProvider` requires BOTH
-/// `CloudAllowed` mode AND a provider-specific grant, so an empty consent set denies all sends
-/// even though mode stays `CloudAllowed` (review #6).
-#[tauri::command]
-pub async fn revoke_cloud_consent(
-    state: State<'_, AppState>,
-    provider: String,
-) -> Result<(), AppError> {
-    state.settings.revoke(&provider).await?;
-    Ok(())
 }
