@@ -5,6 +5,7 @@
 models: bge-small-en-v1.5 / jina-reranker-v1-turbo-en
 
 **Winning arm (buried-fact vector ΔMAP): `bare/min-rank` (Δ +0.200)**
+> *Tie-break note:* 5 other arm(s) share the same ΔMAP on this corpus; the winner above is the first in iteration order, not a measured preference.
 
 | arm | vec ΔMAP | reranked ΔMAP | hybrid ΔMAP (deploy-risk) |
 |-----|---------:|--------------:|-------------------------:|
@@ -14,6 +15,8 @@ models: bge-small-en-v1.5 / jina-reranker-v1-turbo-en
 | title/score-max | +0.125 | +0.000 | +0.125 |
 | title+head/min-rank | +0.125 | +0.000 | +0.125 |
 | title+head/score-max | +0.125 | +0.000 | +0.125 |
+
+> *Rerank invisibility:* reranked ΔMAP is +0.000 across every arm — the cross-encoder recovers the buried fact from the recall pool regardless of chunking, so the lever's signal lives at the **vector/recall stage**, not end-to-end. The real-notes gate (D8) must read the recall stratum, not reranked, to detect chunking's contribution.
 
 ### bare/min-rank — per-category ΔMAP (vs whole)
 - [buried-fact-long-note] vec +0.200 | reranked +0.000

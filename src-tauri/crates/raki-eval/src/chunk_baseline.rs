@@ -46,6 +46,27 @@ to ship."
             out,
             "**Winning arm (buried-fact vector ΔMAP): `{label}` (Δ {delta:+.3})**"
         );
+        // Detect ties: if any other arm has the same delta, the winner is iteration-order only.
+        const TIE_EPS: f64 = 1e-9;
+        let tied = arms
+            .iter()
+            .filter(|(l, r)| {
+                l.as_str() != label
+                    && match (buried_fact_vector_map(r), whole_bf) {
+                        (Some(c), Some(w)) => (c - w - delta).abs() < TIE_EPS,
+                        _ => {
+                            (r.overall_vector.map - whole.overall_vector.map - delta).abs()
+                                < TIE_EPS
+                        }
+                    }
+            })
+            .count();
+        if tied > 0 {
+            let _ = writeln!(
+                out,
+                "> *Tie-break note:* {tied} other arm(s) share the same ΔMAP on this corpus; the winner above is the first in iteration order, not a measured preference."
+            );
+        }
         let _ = writeln!(out);
     }
 
@@ -58,16 +79,28 @@ to ship."
         out,
         "|-----|---------:|--------------:|-------------------------:|"
     );
+    let mut all_rerank_zero = true;
     for (label, rep) in arms {
+        let rr = rep.overall_reranked.map - whole.overall_reranked.map;
+        if rr.abs() > 1e-9 {
+            all_rerank_zero = false;
+        }
         let _ = writeln!(
             out,
             "| {label} | {:+.3} | {:+.3} | {:+.3} |",
             rep.overall_vector.map - whole.overall_vector.map,
-            rep.overall_reranked.map - whole.overall_reranked.map,
+            rr,
             rep.overall_hybrid.map - whole.overall_hybrid.map,
         );
     }
     let _ = writeln!(out);
+    if all_rerank_zero && !arms.is_empty() {
+        let _ = writeln!(
+            out,
+            "> *Rerank invisibility:* reranked ΔMAP is +0.000 across every arm — the cross-encoder recovers the buried fact from the recall pool regardless of chunking, so the lever's signal lives at the **vector/recall stage**, not end-to-end. The real-notes gate (D8) must read the recall stratum, not reranked, to detect chunking's contribution."
+        );
+        let _ = writeln!(out);
+    }
 
     // Per-category deltas (buried-fact / coreference / list controls) for each arm.
     for (label, rep) in arms {
@@ -165,6 +198,38 @@ mod tests {
         assert!(
             md.contains("deploy-risk"),
             "hybrid demoted as deployment-risk"
+        );
+        // On this fixture all reranked deltas are 0.0 → rerank-invisibility note fires.
+        assert!(
+            md.contains("Rerank invisibility"),
+            "rerank-invisibility note present when all deltas are zero"
+        );
+        assert!(
+            md.contains("recovers the buried fact from the recall pool"),
+            "rerank-invisibility explains why signal is recall-stage"
+        );
+        // No tie here → tie-break note absent.
+        assert!(
+            !md.contains("Tie-break note"),
+            "tie-break note absent when there is a clear winner"
+        );
+    }
+
+    #[test]
+    fn surfaces_tie_break_note_when_arms_are_indistinguishable() {
+        let whole = report(0.40);
+        let arms = vec![
+            ("bare/min-rank".to_string(), report(0.60)),  // +0.20
+            ("title/min-rank".to_string(), report(0.60)), // +0.20  ← tied
+        ];
+        let md = render_chunking_baseline(&whole, &arms, "m");
+        assert!(
+            md.contains("Tie-break note"),
+            "tie note present when deltas tie"
+        );
+        assert!(
+            md.contains("first in iteration order"),
+            "tie note explains iteration-order winner"
         );
     }
 }
