@@ -5,6 +5,7 @@ mod fake;
 mod fake_rerank;
 mod fastembed;
 mod messages;
+mod query_rewrite;
 mod rerank;
 pub mod testing;
 
@@ -13,4 +14,5 @@ pub use fake::FakeEmbeddingProvider;
 pub use fake_rerank::FakeReranker;
 pub use fastembed::FastEmbedProvider;
 pub use messages::MessagesProvider;
+pub use query_rewrite::CloudQueryRewriter;
 pub use rerank::{FastEmbedReranker, RERANKER_MODEL_ID};
