@@ -7,6 +7,7 @@ pub mod error;
 pub mod ids;
 pub mod note;
 pub mod ports;
+pub mod query;
 pub mod testing;
 
 pub use body::{body_to_text, text_to_body};
@@ -23,3 +24,4 @@ pub use ports::{
     KeywordIndex, LlmProvider, Locality, NoteRepository, PendingNote, RerankScore, Reranker,
     VectorHit, VectorIndex,
 };
+pub use query::{QueryRewriter, QueryUnderstanding};
