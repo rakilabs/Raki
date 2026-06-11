@@ -22,6 +22,7 @@ pub struct GenerateDeps<'a> {
     pub model: &'a str,
     pub budget: usize,
     pub k: usize,
+    pub rewriter: Option<&'a dyn raki_domain::QueryRewriter>,
 }
 
 /// The result of a QA request.
@@ -66,7 +67,7 @@ pub async fn assemble_for(
     query: &str,
     deps: &GenerateDeps<'_>,
 ) -> Result<Option<(AssembledContext, std::collections::HashMap<String, String>)>, GenerateError> {
-    let ids = hybrid_search(deps.keyword, deps.vectors, deps.embedder, None, query, deps.k)
+    let ids = hybrid_search(deps.keyword, deps.vectors, deps.embedder, deps.rewriter, query, deps.k)
         .await
         .map_err(GenerateError::Domain)?;
 
@@ -328,6 +329,7 @@ mod flow_tests {
             model: "k2",
             budget: 10_000,
             k: 5,
+            rewriter: None,
         }
     }
 
