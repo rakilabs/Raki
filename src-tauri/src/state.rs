@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use raki_ai::GatedLlmProvider;
 use raki_domain::{
-    Clock, EgressLog, EgressSettings, EmbeddingProvider, KeywordIndex, NoteRepository, Reranker,
-    VectorIndex,
+    Clock, EgressLog, EgressSettings, EmbeddingProvider, KeywordIndex, NoteRepository, QueryRewriter,
+    Reranker, VectorIndex,
 };
 
 use crate::indexing::IndexingService;
@@ -33,4 +33,6 @@ pub struct AppState {
     pub k: usize,
     /// Token budget for assembled context.
     pub budget_tokens: usize,
+    /// Optional query rewriter (cloud LLM) for the Ask flow only.
+    pub rewriter: Option<Arc<dyn QueryRewriter>>,
 }

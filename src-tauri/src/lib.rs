@@ -12,11 +12,12 @@ use std::sync::Arc;
 use tauri::Manager;
 
 use raki_ai::{
-    FakeEmbeddingProvider, FastEmbedProvider, FastEmbedReranker, GatedLlmProvider, MessagesProvider,
+    CloudQueryRewriter, FakeEmbeddingProvider, FastEmbedProvider, FastEmbedReranker,
+    GatedLlmProvider, MessagesProvider,
 };
 use raki_domain::{
     Clock, Completion, CompletionRequest, DomainError, EmbeddingProvider, IndexingStore,
-    LlmProvider, Locality, Reranker, VectorIndex,
+    LlmProvider, Locality, QueryRewriter, Reranker, VectorIndex,
 };
 use raki_storage::{
     Database, SqliteEgressLog, SqliteEgressSettings, SqliteIndexingStore, SqliteKeywordIndex,
@@ -128,6 +129,20 @@ pub fn run() {
                 clock.clone(),
             ));
 
+            let query_rewrite_enabled = std::env::var("RAKI_QUERY_REWRITE")
+                .map(|v| v == "1" || v == "true")
+                .unwrap_or(false);
+
+            let rewriter: Option<Arc<dyn QueryRewriter>> = if query_rewrite_enabled {
+                Some(Arc::new(CloudQueryRewriter::new(
+                    gate.clone(),
+                    provider.clone(),
+                    model.clone(),
+                )))
+            } else {
+                None
+            };
+
             app.manage(AppState {
                 notes,
                 keyword,
@@ -143,6 +158,7 @@ pub fn run() {
                 model,
                 k: 10,
                 budget_tokens: 2000,
+                rewriter,
             });
             Ok(())
         })

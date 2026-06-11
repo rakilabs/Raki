@@ -20,6 +20,7 @@ fn deps(state: &AppState) -> raki_generate::GenerateDeps<'_> {
         model: &state.model,
         budget: state.budget_tokens,
         k: state.k,
+        rewriter: state.rewriter.as_ref().map(|r| r.as_ref()),
     }
 }
 
