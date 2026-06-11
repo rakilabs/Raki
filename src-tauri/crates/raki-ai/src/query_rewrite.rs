@@ -109,10 +109,10 @@ impl QueryRewriter for CloudQueryRewriter {
         );
 
         if !understanding.is_fallback {
-            self.cache
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .put(effective_query.to_string(), (understanding.clone(), Instant::now()));
+            self.cache.lock().unwrap_or_else(|e| e.into_inner()).put(
+                effective_query.to_string(),
+                (understanding.clone(), Instant::now()),
+            );
         }
         Ok(understanding)
     }
