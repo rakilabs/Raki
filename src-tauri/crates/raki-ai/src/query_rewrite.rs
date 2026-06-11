@@ -67,18 +67,21 @@ impl QueryRewriter for CloudQueryRewriter {
 
         // Cache check
         {
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
             if let Some((cached, ts)) = cache.get(query) {
                 if ts.elapsed() < CACHE_TTL {
                     return Ok(cached.clone());
                 }
             }
+            cache.pop(query);
         }
 
         let decision = EgressDecision {
             provider: self.provider.clone(),
             model: self.model.clone(),
             source_ids: vec![SourceId("query-rewrite".to_string())],
+            // Conservative over-estimate: characters ≈ 2-4× tokens for CJK/Latin mix.
+            // Proper token counting requires a tokenizer; this is a lower-bound proxy.
             total_tokens: query.chars().count(),
         };
         let req = CompletionRequest {
@@ -104,7 +107,7 @@ impl QueryRewriter for CloudQueryRewriter {
             "query_rewrite"
         );
 
-        self.cache.lock().unwrap().put(query.to_string(), (understanding.clone(), Instant::now()));
+        self.cache.lock().unwrap_or_else(|e| e.into_inner()).put(query.to_string(), (understanding.clone(), Instant::now()));
         Ok(understanding)
     }
 }
@@ -164,7 +167,7 @@ fn parse_understanding(raw: &str, original: &str) -> Result<QueryUnderstanding, 
     }
 
     // JSON parse failed: use raw text as rewritten query if non-empty
-    if !text.is_empty() {
+    if !text.trim().is_empty() {
         return Ok(QueryUnderstanding {
             rewritten_query: text.to_string(),
             needs_multi_hop: false,
