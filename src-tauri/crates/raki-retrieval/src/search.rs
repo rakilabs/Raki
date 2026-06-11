@@ -29,21 +29,23 @@ pub async fn hybrid_candidates(
     keyword: &dyn KeywordIndex,
     vectors: &dyn VectorIndex,
     embedder: &dyn EmbeddingProvider,
+    rewriter: Option<&dyn raki_domain::QueryRewriter>,
     query: &str,
     pool: usize,
 ) -> Result<Vec<NoteId>, DomainError> {
     let depth = pool.max(HYBRID_CANDIDATE_POOL);
+    let effective_query = resolve_query(rewriter, query).await?;
     let mut out: Vec<NoteId> = Vec::new();
     let mut seen: HashSet<NoteId> = HashSet::new();
 
-    for chunk_id in vector_search(vectors, embedder, query, depth).await? {
+    for chunk_id in vector_search(vectors, embedder, &effective_query, depth).await? {
         let note_id = note_id_from_chunk(&chunk_id)?;
         if seen.insert(note_id) {
             out.push(note_id);
         }
     }
 
-    for id in search(keyword, query, depth).await? {
+    for id in search(keyword, &effective_query, depth).await? {
         let note_id = NoteId::parse(&id)?;
         if seen.insert(note_id) {
             out.push(note_id);
@@ -62,10 +64,11 @@ pub async fn hybrid_search(
     keyword: &dyn KeywordIndex,
     vectors: &dyn VectorIndex,
     embedder: &dyn EmbeddingProvider,
+    rewriter: Option<&dyn raki_domain::QueryRewriter>,
     query: &str,
     k: usize,
 ) -> Result<Vec<NoteId>, DomainError> {
-    let mut out = hybrid_candidates(keyword, vectors, embedder, query, k).await?;
+    let mut out = hybrid_candidates(keyword, vectors, embedder, rewriter, query, k).await?;
     out.truncate(k);
     Ok(out)
 }
@@ -95,11 +98,30 @@ pub async fn vector_search(
     Ok(hits.into_iter().map(|h| h.source_id).collect())
 }
 
+async fn resolve_query(
+    rewriter: Option<&dyn raki_domain::QueryRewriter>,
+    query: &str,
+) -> Result<String, DomainError> {
+    match rewriter {
+        Some(r) => match r.understand(query).await {
+            Ok(u) if !u.is_fallback && !u.rewritten_query.trim().is_empty() => {
+                if u.needs_multi_hop && !u.sub_queries.is_empty() {
+                    Ok(u.sub_queries[0].clone()) // stub: use first sub-query
+                } else {
+                    Ok(u.rewritten_query)
+                }
+            }
+            _ => Ok(query.to_string()),
+        },
+        None => Ok(query.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use raki_domain::{DomainError, KeywordHit, KeywordIndex};
+    use raki_domain::{DomainError, KeywordHit, KeywordIndex, QueryUnderstanding};
 
     // Stable UUIDs used in place of single-letter ids so NoteId::parse succeeds.
     const ID_A: &str = "00000000-0000-0000-0000-00000000000a";
@@ -198,7 +220,7 @@ mod tests {
         // ids vector missed (a, d), in keyword order, after the vector block.
         let keyword = FakeKeyword(vec![ID_A, ID_B, ID_C, ID_D]);
         let vectors = FakeVectors(vec![ID_C.to_string(), ID_B.to_string(), ID_E.to_string()]);
-        let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, "q", 4)
+        let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, None, "q", 4)
             .await
             .unwrap();
         assert_eq!(
@@ -212,7 +234,7 @@ mod tests {
     async fn hybrid_candidates_returns_the_untruncated_union() {
         let keyword = FakeKeyword(vec![ID_A, ID_B]);
         let vectors = FakeVectors(vec![ID_B.to_string(), ID_C.to_string()]);
-        let ids = hybrid_candidates(&keyword, &vectors, &FakeEmbed, "q", 20)
+        let ids = hybrid_candidates(&keyword, &vectors, &FakeEmbed, None, "q", 20)
             .await
             .unwrap();
         assert_eq!(
@@ -227,7 +249,7 @@ mod tests {
         // vector: [b, c] is authoritative; keyword-only "a" backfills after it.
         let keyword = FakeKeyword(vec![ID_A, ID_B]);
         let vectors = FakeVectors(vec![ID_B.to_string(), ID_C.to_string()]);
-        let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, "q", 3)
+        let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, None, "q", 3)
             .await
             .unwrap();
         assert_eq!(
@@ -243,7 +265,7 @@ mod tests {
         // carries the results — search still works.
         let keyword = FakeKeyword(vec![ID_A, ID_B]);
         let vectors = FakeVectors(vec![]);
-        let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, "q", 3)
+        let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, None, "q", 3)
             .await
             .unwrap();
         assert_eq!(ids, vec![nid(ID_A), nid(ID_B)]);
@@ -258,7 +280,7 @@ mod tests {
             format!("{ID_B}#1"),
             format!("{ID_A}#2"),
         ]);
-        let ids = hybrid_candidates(&keyword, &vectors, &FakeEmbed, "q", 20)
+        let ids = hybrid_candidates(&keyword, &vectors, &FakeEmbed, None, "q", 20)
             .await
             .unwrap();
         assert_eq!(
@@ -272,7 +294,7 @@ mod tests {
     async fn hybrid_candidates_never_emits_raw_chunk_ids() {
         let keyword = FakeKeyword(vec![]);
         let vectors = FakeVectors(vec![format!("{ID_A}#0"), format!("{ID_B}#1")]);
-        let ids = hybrid_candidates(&keyword, &vectors, &FakeEmbed, "q", 20)
+        let ids = hybrid_candidates(&keyword, &vectors, &FakeEmbed, None, "q", 20)
             .await
             .unwrap();
         for id in &ids {
@@ -282,5 +304,40 @@ mod tests {
             );
         }
         assert_eq!(ids, vec![nid(ID_A), nid(ID_B)]);
+    }
+
+    struct FakeRewriter(&'static str);
+    #[async_trait]
+    impl raki_domain::QueryRewriter for FakeRewriter {
+        async fn understand(&self, _query: &str) -> Result<QueryUnderstanding, DomainError> {
+            Ok(QueryUnderstanding {
+                rewritten_query: self.0.to_string(),
+                needs_multi_hop: false,
+                sub_queries: vec![],
+                confidence: 0.9,
+                is_fallback: false,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_uses_rewritten_query_when_rewriter_provided() {
+        let keyword = FakeKeyword(vec![ID_A]);
+        let vectors = FakeVectors(vec![ID_A.to_string()]);
+        let rewriter = FakeRewriter("explicit keyword");
+        let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, Some(&rewriter), "vague", 3)
+            .await
+            .unwrap();
+        assert_eq!(ids, vec![nid(ID_A)]);
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_falls_back_when_rewriter_returns_fallback() {
+        let keyword = FakeKeyword(vec![ID_A]);
+        let vectors = FakeVectors(vec![]);
+        let rewriter = FakeRewriter(""); // empty → fallback
+        let _ = hybrid_search(&keyword, &vectors, &FakeEmbed, Some(&rewriter), "vague", 3)
+            .await
+            .unwrap();
     }
 }
