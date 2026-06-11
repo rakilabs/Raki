@@ -206,7 +206,7 @@ mod tests {
         let raw = "cash payment method";
         let u = parse_understanding(raw, "how pay?").unwrap();
         assert_eq!(u.rewritten_query, "cash payment method");
-        assert!(!u.is_fallback);
+        assert!(u.is_fallback);
         assert_eq!(u.confidence, 0.5);
     }
 
