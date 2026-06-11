@@ -1,6 +1,10 @@
 import {
   createContext,
+  createEffect,
+  createMemo,
   createSignal,
+  onCleanup,
+  onMount,
   type ParentComponent,
   useContext,
 } from "solid-js";
@@ -25,49 +29,60 @@ function getSystemTheme(): ResolvedTheme {
     : "light";
 }
 
+function applyThemeClass(t: ResolvedTheme) {
+  const root = document.documentElement;
+  root.classList.remove("light", "dark");
+  root.classList.add(t);
+  root.setAttribute("data-theme", t);
+}
+
 export const ThemeProvider: ParentComponent<{ defaultTheme?: Theme }> = (
   props
 ) => {
+  const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
+  const validStored: Theme | null =
+    stored && ["light", "dark", "system"].includes(stored) ? stored : null;
+
   const [theme, setThemeState] = createSignal<Theme>(
-    (localStorage.getItem(STORAGE_KEY) as Theme) ||
-      props.defaultTheme ||
-      "system"
+    validStored || props.defaultTheme || "system"
   );
 
-  const resolvedTheme = (): ResolvedTheme => {
+  const resolvedTheme = createMemo<ResolvedTheme>(() => {
     const t = theme();
     return t === "system" ? getSystemTheme() : t;
-  };
+  });
 
-  const applyTheme = (t: ResolvedTheme) => {
-    const root = document.documentElement;
-    root.classList.remove("light", "dark");
-    root.classList.add(t);
-  };
-
-  // Apply on mount and when theme changes
-  applyTheme(resolvedTheme());
+  // Sync class to DOM whenever resolved theme changes
+  createEffect(() => {
+    applyThemeClass(resolvedTheme());
+  });
 
   const setTheme = (t: Theme) => {
     localStorage.setItem(STORAGE_KEY, t);
     setThemeState(t);
-    applyTheme(t === "system" ? getSystemTheme() : t);
+  };
+
+  const toggle = () => {
+    const current = resolvedTheme();
+    setTheme(current === "dark" ? "light" : "dark");
   };
 
   // Listen for system theme changes
-  const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-  mediaQuery.addEventListener("change", () => {
-    if (theme() === "system") {
-      applyTheme(getSystemTheme());
-    }
+  onMount(() => {
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = () => {
+      if (theme() === "system") {
+        applyThemeClass(getSystemTheme());
+      }
+    };
+    mediaQuery.addEventListener("change", handler);
+    onCleanup(() => mediaQuery.removeEventListener("change", handler));
   });
 
-  const toggle = () => {
-    setTheme(resolvedTheme() === "dark" ? "light" : "dark");
-  };
-
   return (
-    <ThemeContext.Provider value={{ theme, resolvedTheme, setTheme, toggle }}>
+    <ThemeContext.Provider
+      value={{ theme, resolvedTheme: resolvedTheme, setTheme, toggle }}
+    >
       {props.children}
     </ThemeContext.Provider>
   );

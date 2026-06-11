@@ -76,6 +76,16 @@
     <div id="error-root" style="display:none; background:#fee; color:#900; padding:20px; font-family:monospace; white-space:pre-wrap;"></div>
 
     <script>
+      (function() {
+        var theme = localStorage.getItem('raki.theme') || 'system';
+        var resolved = theme === 'system'
+          ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : theme;
+        document.documentElement.classList.add(resolved);
+        document.documentElement.setAttribute('data-theme', resolved);
+      })();
+    </script>
+    <script>
       window.addEventListener('error', function(e) {
         var splash = document.getElementById('splash');
         if (splash) splash.style.display = 'none';

@@ -7,7 +7,7 @@ import {
   Settings,
   Sun,
 } from "lucide-solid";
-import { Match, Switch } from "solid-js";
+import { createMemo } from "solid-js";
 import { useTheme } from "~/app/providers/ThemeProvider";
 import { cn } from "~/shared/lib/cn";
 
@@ -20,6 +20,13 @@ export default function Layout(props: RouteSectionProps) {
     { href: "/ask", label: "Ask AI", icon: MessageCircle },
     { href: "/settings", label: "Settings", icon: Settings },
   ];
+
+  const themeIcon = createMemo(() => {
+    const t = theme.resolvedTheme();
+    if (t === "dark") return <Moon class="h-5 w-5" />;
+    if (t === "light") return <Sun class="h-5 w-5" />;
+    return <Laptop class="h-5 w-5" />;
+  });
 
   return (
     <div class="flex h-screen bg-background text-foreground">
@@ -63,14 +70,7 @@ export default function Layout(props: RouteSectionProps) {
             class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             aria-label="Toggle theme"
           >
-            <Switch fallback={<Laptop class="h-5 w-5" />}>
-              <Match when={theme.resolvedTheme() === "dark"}>
-                <Moon class="h-5 w-5" />
-              </Match>
-              <Match when={theme.resolvedTheme() === "light"}>
-                <Sun class="h-5 w-5" />
-              </Match>
-            </Switch>
+            {themeIcon()}
             <span class="hidden md:inline">Theme</span>
           </button>
         </div>
