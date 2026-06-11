@@ -84,6 +84,9 @@ use raki_retrieval::{
 use raki_storage::{Database, SqliteKeywordIndex, SqliteNoteRepository, SqliteVectorIndex};
 
 /// Deterministic, no-LLM rewriter for CI-stable eval gates.
+///
+/// Uses naive substring matching (eval-scoped). Not suitable for production queries
+/// without word-boundary guards.
 pub struct RuleBasedRewriter;
 
 #[async_trait]
@@ -91,14 +94,14 @@ impl QueryRewriter for RuleBasedRewriter {
     async fn understand(&self, query: &str) -> Result<QueryUnderstanding, DomainError> {
         let lowered = query.to_lowercase();
         let rewritten = if lowered.contains("inn") {
-            query.replace("inn", "ryokan")
+            lowered.replace("inn", "ryokan")
         } else if lowered.contains("spend") || lowered.contains("spent") {
-            query.replace("spend", "expenses")
+            lowered.replace("spend", "expenses")
                  .replace("spent", "expenses")
         } else {
-            query.to_string()
+            lowered.clone()
         };
-        let changed = rewritten != query;
+        let changed = rewritten != lowered;
         Ok(QueryUnderstanding {
             rewritten_query: rewritten,
             needs_multi_hop: false,
@@ -668,6 +671,31 @@ mod tests {
         let u = rw.understand("how do I pay at the inn?").await.unwrap();
         assert!(u.rewritten_query.contains("ryokan"));
         assert!(!u.is_fallback);
+    }
+
+    #[tokio::test]
+    async fn rule_based_rewriter_expands_spend() {
+        let rw = RuleBasedRewriter;
+        let u = rw.understand("how much did we spend?").await.unwrap();
+        assert!(u.rewritten_query.contains("expenses"));
+        assert!(!u.is_fallback);
+    }
+
+    #[tokio::test]
+    async fn rule_based_rewriter_expands_spent() {
+        let rw = RuleBasedRewriter;
+        let u = rw.understand("what I spent in Kyoto").await.unwrap();
+        assert!(u.rewritten_query.contains("expenses"));
+        assert!(!u.is_fallback);
+    }
+
+    #[tokio::test]
+    async fn rule_based_rewriter_fallback_on_unmatched() {
+        let rw = RuleBasedRewriter;
+        let u = rw.understand("hello world").await.unwrap();
+        assert_eq!(u.rewritten_query, "hello world");
+        assert!(u.is_fallback);
+        assert_eq!(u.confidence, 0.0);
     }
 
     #[tokio::test]

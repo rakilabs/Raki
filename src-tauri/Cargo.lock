@@ -4106,6 +4106,7 @@ dependencies = [
 name = "raki-eval"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "pulldown-cmark",
  "raki-ai",
  "raki-domain",
