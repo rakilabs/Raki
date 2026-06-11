@@ -40,7 +40,7 @@ pub enum GenerateError {
     Domain(DomainError),
 }
 
-use raki_domain::{CompletionRequest, NoteId};
+use raki_domain::CompletionRequest;
 use raki_memory::{assemble_context, AssembledContext, Candidate};
 use raki_retrieval::hybrid_search;
 
@@ -73,17 +73,10 @@ pub async fn assemble_for(
     let mut candidates = Vec::new();
     let mut titles = std::collections::HashMap::new();
     for (rank, id) in ids.iter().enumerate() {
-        let nid = match NoteId::parse(id) {
-            Ok(n) => n,
-            Err(e) => {
-                eprintln!("skipping malformed source id {id}: {e}");
-                continue;
-            }
-        };
-        if let Some(note) = deps.notes.get(&nid).await.map_err(GenerateError::Domain)? {
-            titles.insert(id.clone(), note.title.clone());
+        if let Some(note) = deps.notes.get(id).await.map_err(GenerateError::Domain)? {
+            titles.insert(id.to_string(), note.title.clone());
             candidates.push(Candidate {
-                source_id: id.clone(),
+                source_id: id.to_string(),
                 text: format!("{}\n{}", note.title, body_to_text(&note.body)),
                 score: (ids.len() - rank) as f64,
             });
@@ -191,6 +184,12 @@ mod flow_tests {
     #[async_trait]
     impl VectorIndex for OneVector {
         async fn upsert(&self, _: &str, _: &Embedding) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn delete_by_prefix(&self, _prefix: &str) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn upsert_batch(&self, _items: &[(String, Embedding)]) -> Result<(), DomainError> {
             Ok(())
         }
         async fn query(&self, _: &Embedding, _: usize) -> Result<Vec<VectorHit>, DomainError> {

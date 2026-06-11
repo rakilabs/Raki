@@ -4,7 +4,7 @@
 use async_trait::async_trait;
 use rusqlite::params;
 
-use raki_domain::{body_to_text, DomainError, IndexingStore, NoteId, PendingNote};
+use raki_domain::{DomainError, IndexingStore, NoteId, PendingNote};
 
 use crate::db::Database;
 use crate::hash::content_hash;
@@ -66,6 +66,7 @@ impl IndexingStore for SqliteIndexingStore {
                             OR embedded_hash != content_hash
                             OR embedded_model IS NULL
                             OR embedded_model != ?1)
+                     ORDER BY updated_at DESC
                      LIMIT ?2",
                 )?;
                 let rows = stmt
@@ -82,7 +83,8 @@ impl IndexingStore for SqliteIndexingStore {
                     .map(|(id, title, body, content_hash)| {
                         Ok(PendingNote {
                             id: note_id_from_row(&id)?,
-                            text: format!("{title}\n\n{}", body_to_text(&body)),
+                            title,
+                            body,
                             content_hash,
                         })
                     })
@@ -226,5 +228,39 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(null_hashes, 0);
+    }
+
+    #[tokio::test]
+    async fn list_pending_orders_by_updated_at_desc() {
+        let db = Database::open_in_memory().unwrap();
+        let repo = SqliteNoteRepository::new(db.clone());
+        let store = SqliteIndexingStore::new(db.clone());
+
+        let older = Note {
+            id: NoteId::new(),
+            title: "Older".to_string(),
+            body: "body".to_string(),
+            created_at: 1000,
+            updated_at: 1000,
+            deleted_at: None,
+            version: 1,
+        };
+        repo.upsert(&older).await.unwrap();
+
+        let newer = Note {
+            id: NoteId::new(),
+            title: "Newer".to_string(),
+            body: "body".to_string(),
+            created_at: 2000,
+            updated_at: 2000,
+            deleted_at: None,
+            version: 1,
+        };
+        repo.upsert(&newer).await.unwrap();
+
+        let pending = store.list_pending(MODEL, 10).await.unwrap();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].id, newer.id);
+        assert_eq!(pending[1].id, older.id);
     }
 }

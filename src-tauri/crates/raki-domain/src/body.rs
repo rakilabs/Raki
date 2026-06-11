@@ -78,15 +78,17 @@ pub fn body_to_blocks(body: &str) -> Vec<Block> {
                 Some("heading") => {
                     let mut text = String::new();
                     collect_text(node, &mut text);
-                    current_heading = Some(text);
+                    current_heading = if text.is_empty() { None } else { Some(text) };
                 }
                 Some("paragraph") | Some("codeBlock") => {
                     let mut text = String::new();
                     collect_text(node, &mut text);
-                    blocks.push(Block {
-                        heading: current_heading.clone(),
-                        text,
-                    });
+                    if !text.is_empty() {
+                        blocks.push(Block {
+                            heading: current_heading.clone(),
+                            text,
+                        });
+                    }
                 }
                 Some("bulletList") | Some("orderedList") => {
                     let mut items: Vec<String> = Vec::new();
@@ -94,13 +96,18 @@ pub fn body_to_blocks(body: &str) -> Vec<Block> {
                         for item in list_content {
                             let mut item_text = String::new();
                             collect_text(item, &mut item_text);
-                            items.push(item_text);
+                            if !item_text.is_empty() {
+                                items.push(item_text);
+                            }
                         }
                     }
-                    blocks.push(Block {
-                        heading: current_heading.clone(),
-                        text: items.join("\n"),
-                    });
+                    let text = items.join("\n");
+                    if !text.is_empty() {
+                        blocks.push(Block {
+                            heading: current_heading.clone(),
+                            text,
+                        });
+                    }
                 }
                 _ => {}
             }
@@ -220,8 +227,30 @@ mod tests {
     }
 
     #[test]
+    fn body_to_blocks_extracts_code_blocks() {
+        let doc = r#"{"type":"doc","content":[{"type":"codeBlock","attrs":{"language":"rust"},"content":[{"type":"text","text":"fn main() {}"}]}]}"#;
+        let blocks = body_to_blocks(doc);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].heading, None);
+        assert_eq!(blocks[0].text, "fn main() {}");
+    }
+
+    #[test]
     fn body_to_blocks_returns_empty_for_invalid_json() {
         let blocks = body_to_blocks("not json");
+        assert!(blocks.is_empty());
+    }
+
+    #[test]
+    fn body_to_blocks_empty_doc_returns_empty_vec() {
+        let blocks = body_to_blocks("{}");
+        assert!(blocks.is_empty());
+    }
+
+    #[test]
+    fn body_to_blocks_skips_unknown_nodes() {
+        let doc = r#"{"type":"doc","content":[{"type":"horizontalRule"}]}"#;
+        let blocks = body_to_blocks(doc);
         assert!(blocks.is_empty());
     }
 }

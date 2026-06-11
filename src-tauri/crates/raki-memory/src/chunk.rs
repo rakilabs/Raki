@@ -19,7 +19,10 @@ pub fn cap_split(text: &str) -> Vec<String> {
         let split_at = if end == text.len() {
             end
         } else {
-            text[start..end].rfind(' ').map(|i| start + i).unwrap_or(end)
+            text[start..end]
+                .rfind(' ')
+                .map(|i| start + i)
+                .unwrap_or(end)
         };
         chunks.push(text[start..split_at].to_string());
         start = split_at;
@@ -170,7 +173,11 @@ mod tests {
             long_text
         );
         let chunks = chunk_note("My Note", &body, true);
-        assert!(chunks.len() > 1, "expected multiple chunks, got {}", chunks.len());
+        assert!(
+            chunks.len() > 1,
+            "expected multiple chunks, got {}",
+            chunks.len()
+        );
         let recovered = chunks.join(" ");
         assert!(
             recovered.contains(&long_text),

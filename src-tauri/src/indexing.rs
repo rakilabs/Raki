@@ -2,77 +2,12 @@
 //! vector → compare-and-stamp, with per-note failure isolation. Pure of Tauri so it
 //! is unit-testable; `IndexingService` adds dependency injection + single-flight.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use raki_domain::{
-    DomainError, EmbeddingProvider, IndexingStore, NoteId, PendingNote, VectorIndex,
-};
-
-/// Outcome of one drain.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct EmbedStats {
-    pub embedded: usize,
-    pub failed: usize,
-}
-
-/// Embed every stale live note for the embedder's model, idempotently. A note whose
-/// content changed mid-flight is left stale (re-embeds next call); a note that errors
-/// is isolated so one bad note can't stall the batch.
-pub async fn embed_pending(
-    store: &dyn IndexingStore,
-    embedder: &dyn EmbeddingProvider,
-    vectors: &dyn VectorIndex,
-    batch: usize,
-) -> Result<EmbedStats, DomainError> {
-    let model_id = embedder.model_id();
-    let mut embedded = 0usize;
-    let mut failed: HashSet<NoteId> = HashSet::new();
-
-    loop {
-        let pending = store.list_pending(&model_id, batch).await?;
-        let todo: Vec<PendingNote> = pending
-            .into_iter()
-            .filter(|p| !failed.contains(&p.id))
-            .collect();
-        if todo.is_empty() {
-            break;
-        }
-        for note in todo {
-            match embed_one(store, embedder, vectors, &note).await {
-                Ok(true) => embedded += 1,
-                Ok(false) => { /* superseded mid-flight; re-listed next loop with fresh hash */ }
-                Err(_) => {
-                    failed.insert(note.id);
-                }
-            }
-        }
-    }
-
-    Ok(EmbedStats {
-        embedded,
-        failed: failed.len(),
-    })
-}
-
-async fn embed_one(
-    store: &dyn IndexingStore,
-    embedder: &dyn EmbeddingProvider,
-    vectors: &dyn VectorIndex,
-    note: &PendingNote,
-) -> Result<bool, DomainError> {
-    let mut out = embedder.embed(std::slice::from_ref(&note.text)).await?;
-    let emb = out
-        .pop()
-        .ok_or_else(|| DomainError::Provider("embedder returned no vector".to_string()))?;
-    vectors.upsert(&note.id.to_string(), &emb).await?;
-    // Stamp last: if we crash before this, the note stays stale and re-embeds.
-    store
-        .mark_embedded(&note.id, &note.content_hash, &embedder.model_id())
-        .await
-}
+use raki_domain::{DomainError, EmbeddingProvider, IndexingStore, VectorIndex};
+use raki_memory::indexing::{embed_pending, EmbedConfig, EmbedStats};
 
 /// DI + single-flight wrapper around `embed_pending`. `trigger` fires a background
 /// pass and silently skips if one is already running.
@@ -102,10 +37,12 @@ impl IndexingService {
     /// Backfill missing hashes, then drain. Used at startup and from `trigger`.
     pub async fn run_once(&self) -> Result<EmbedStats, DomainError> {
         self.store.backfill_content_hashes().await?;
+        let config = EmbedConfig::default();
         embed_pending(
             self.store.as_ref(),
             self.embedder.as_ref(),
             self.vectors.as_ref(),
+            &config,
             self.batch,
         )
         .await
@@ -165,16 +102,28 @@ mod tests {
         }
         let (store, embedder, vectors) = wiring(&db);
 
-        let first = embed_pending(store.as_ref(), embedder.as_ref(), vectors.as_ref(), 32)
-            .await
-            .unwrap();
+        let first = embed_pending(
+            store.as_ref(),
+            embedder.as_ref(),
+            vectors.as_ref(),
+            &EmbedConfig::default(),
+            32,
+        )
+        .await
+        .unwrap();
         assert_eq!(first.embedded, 3);
         assert_eq!(vector_count(&db).await, 3);
 
         // Nothing stale now → a second pass embeds nothing.
-        let second = embed_pending(store.as_ref(), embedder.as_ref(), vectors.as_ref(), 32)
-            .await
-            .unwrap();
+        let second = embed_pending(
+            store.as_ref(),
+            embedder.as_ref(),
+            vectors.as_ref(),
+            &EmbedConfig::default(),
+            32,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             second,
             EmbedStats {
@@ -195,9 +144,15 @@ mod tests {
             .await
             .unwrap();
         let (store, embedder, vectors) = wiring(&db);
-        embed_pending(store.as_ref(), embedder.as_ref(), vectors.as_ref(), 32)
-            .await
-            .unwrap();
+        embed_pending(
+            store.as_ref(),
+            embedder.as_ref(),
+            vectors.as_ref(),
+            &EmbedConfig::default(),
+            32,
+        )
+        .await
+        .unwrap();
 
         // Edit one note → exactly one becomes stale.
         let mut edit = repo
@@ -210,9 +165,15 @@ mod tests {
         edit.body = "rewritten".to_string();
         repo.upsert(&edit).await.unwrap();
 
-        let again = embed_pending(store.as_ref(), embedder.as_ref(), vectors.as_ref(), 32)
-            .await
-            .unwrap();
+        let again = embed_pending(
+            store.as_ref(),
+            embedder.as_ref(),
+            vectors.as_ref(),
+            &EmbedConfig::default(),
+            32,
+        )
+        .await
+        .unwrap();
         assert_eq!(again.embedded, 1);
     }
 }

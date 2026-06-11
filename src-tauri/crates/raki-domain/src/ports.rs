@@ -104,9 +104,14 @@ pub struct VectorHit {
 
 #[async_trait]
 pub trait VectorIndex: Send + Sync {
+    /// Store or overwrite a single vector indexed by `source_id`.
     async fn upsert(&self, source_id: &str, embedding: &Embedding) -> Result<(), DomainError>;
+    /// Return up to `k` nearest vectors to `embedding`, best-first by distance.
     async fn query(&self, embedding: &Embedding, k: usize) -> Result<Vec<VectorHit>, DomainError>;
+    /// Delete all vectors whose `source_id` starts with `prefix`.
     async fn delete_by_prefix(&self, prefix: &str) -> Result<(), DomainError>;
+    /// Upsert multiple vectors in one operation. Each tuple is `(source_id, embedding)`.
+    /// Overwrites any existing vectors with matching `source_id`s.
     async fn upsert_batch(&self, items: &[(String, Embedding)]) -> Result<(), DomainError>;
 }
 
@@ -123,7 +128,7 @@ pub trait KeywordIndex: Send + Sync {
     async fn query(&self, query: &str, k: usize) -> Result<Vec<KeywordHit>, DomainError>;
 }
 
-/// A note awaiting (re)embedding: its id, the text to embed, and the content hash
+/// A note awaiting (re)embedding: its id, raw title and body (for chunking), and the content hash
 /// that text corresponds to (used for the compare-and-stamp guard).
 pub struct PendingNote {
     pub id: NoteId,
@@ -175,11 +180,12 @@ mod tests {
     /// Compilation test: VectorIndex must expose delete_by_prefix and upsert_batch.
     #[test]
     fn vector_index_methods_exist() {
-        // We can't instantiate a dyn trait without an impl, so we just assert the
-        // trait bounds compile by referencing the methods in a generic context.
-        fn _assert_vector_index_methods<T: VectorIndex>() {}
-        // If the methods are missing the trait will not be considered implemented.
-        // The real check is that this module compiles at all.
+        fn _assert_vector_index_methods<T: VectorIndex>(t: &T) {
+            drop(t.delete_by_prefix(""));
+            drop(t.upsert_batch(&[]));
+            drop(t.upsert("", &Embedding(vec![])));
+            drop(t.query(&Embedding(vec![]), 0));
+        }
     }
 }
 

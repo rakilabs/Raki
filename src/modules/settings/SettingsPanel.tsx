@@ -95,7 +95,7 @@ export function SettingsPanel(props: { onClose: () => void }) {
                           <td>{new Date(e.created_at).toLocaleString()}</td>
                           <td>{e.provider}</td>
                           <td>{e.model}</td>
-                          <td>{e.token_count}</td>
+                          <td>{Number(e.token_count)}</td>
                           <td>{e.source_count}</td>
                           <td>{e.success ? "✓" : "✗"}</td>
                         </tr>

@@ -1,7 +1,15 @@
 //! The query-time ranking seams: `search` (keyword), `vector_search` (semantic), and
 //! `hybrid_search`, a vector-primary recall union of the two.
 
-use raki_domain::{DomainError, EmbeddingProvider, KeywordIndex, VectorIndex};
+use std::collections::HashSet;
+
+use raki_domain::{DomainError, EmbeddingProvider, KeywordIndex, NoteId, VectorIndex};
+
+/// Strip the chunk suffix (`#<n>`) and parse the leading note ID.
+fn note_id_from_chunk(chunk_id: &str) -> Result<NoteId, DomainError> {
+    let raw = chunk_id.split('#').next().unwrap_or(chunk_id);
+    NoteId::parse(raw)
+}
 
 /// Candidate depth pulled from each retriever before merging. The keyword pool needs depth
 /// so its backfill ids are available; the merged result is still truncated to `k`.
@@ -23,14 +31,25 @@ pub async fn hybrid_candidates(
     embedder: &dyn EmbeddingProvider,
     query: &str,
     pool: usize,
-) -> Result<Vec<String>, DomainError> {
+) -> Result<Vec<NoteId>, DomainError> {
     let depth = pool.max(HYBRID_CANDIDATE_POOL);
-    let mut out = vector_search(vectors, embedder, query, depth).await?;
-    for id in search(keyword, query, depth).await? {
-        if !out.contains(&id) {
-            out.push(id);
+    let mut out: Vec<NoteId> = Vec::new();
+    let mut seen: HashSet<NoteId> = HashSet::new();
+
+    for chunk_id in vector_search(vectors, embedder, query, depth).await? {
+        let note_id = note_id_from_chunk(&chunk_id)?;
+        if seen.insert(note_id) {
+            out.push(note_id);
         }
     }
+
+    for id in search(keyword, query, depth).await? {
+        let note_id = NoteId::parse(&id)?;
+        if seen.insert(note_id) {
+            out.push(note_id);
+        }
+    }
+
     Ok(out)
 }
 
@@ -45,7 +64,7 @@ pub async fn hybrid_search(
     embedder: &dyn EmbeddingProvider,
     query: &str,
     k: usize,
-) -> Result<Vec<String>, DomainError> {
+) -> Result<Vec<NoteId>, DomainError> {
     let mut out = hybrid_candidates(keyword, vectors, embedder, query, k).await?;
     out.truncate(k);
     Ok(out)
@@ -82,6 +101,19 @@ mod tests {
     use async_trait::async_trait;
     use raki_domain::{DomainError, KeywordHit, KeywordIndex};
 
+    // Stable UUIDs used in place of single-letter ids so NoteId::parse succeeds.
+    const ID_A: &str = "00000000-0000-0000-0000-00000000000a";
+    const ID_B: &str = "00000000-0000-0000-0000-00000000000b";
+    const ID_C: &str = "00000000-0000-0000-0000-00000000000c";
+    const ID_D: &str = "00000000-0000-0000-0000-00000000000d";
+    const ID_E: &str = "00000000-0000-0000-0000-00000000000e";
+    const ID_X: &str = "00000000-0000-0000-0000-00000000000x";
+    const ID_Y: &str = "00000000-0000-0000-0000-00000000000y";
+
+    fn nid(s: &str) -> NoteId {
+        NoteId::parse(s).unwrap()
+    }
+
     struct FakeKeyword(Vec<&'static str>);
 
     #[async_trait]
@@ -101,9 +133,12 @@ mod tests {
 
     #[tokio::test]
     async fn search_returns_ids_in_index_order() {
-        let index = FakeKeyword(vec!["b", "a", "c"]);
+        let index = FakeKeyword(vec![ID_B, ID_A, ID_C]);
         let ids = search(&index, "anything", 10).await.unwrap();
-        assert_eq!(ids, vec!["b".to_string(), "a".to_string(), "c".to_string()]);
+        assert_eq!(
+            ids,
+            vec![ID_B.to_string(), ID_A.to_string(), ID_C.to_string()]
+        );
     }
 
     use raki_domain::{Embedding, EmbeddingProvider, Locality, VectorHit, VectorIndex};
@@ -125,7 +160,7 @@ mod tests {
         }
     }
 
-    struct FakeVectors(Vec<&'static str>);
+    struct FakeVectors(Vec<String>);
     #[async_trait]
     impl VectorIndex for FakeVectors {
         async fn upsert(&self, _id: &str, _e: &Embedding) -> Result<(), DomainError> {
@@ -137,51 +172,52 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(i, id)| VectorHit {
-                    source_id: id.to_string(),
+                    source_id: id.clone(),
                     distance: i as f32,
                 })
                 .collect())
+        }
+        async fn delete_by_prefix(&self, _prefix: &str) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn upsert_batch(&self, _items: &[(String, Embedding)]) -> Result<(), DomainError> {
+            Ok(())
         }
     }
 
     #[tokio::test]
     async fn vector_search_returns_ids_best_first() {
-        let vectors = FakeVectors(vec!["x", "y"]);
+        let vectors = FakeVectors(vec![ID_X.to_string(), ID_Y.to_string()]);
         let ids = vector_search(&vectors, &FakeEmbed, "q", 10).await.unwrap();
-        assert_eq!(ids, vec!["x".to_string(), "y".to_string()]);
+        assert_eq!(ids, vec![ID_X.to_string(), ID_Y.to_string()]);
     }
 
     #[tokio::test]
     async fn hybrid_search_output_is_characterized() {
         // Vector is authoritative [c, b, e]; keyword [a, b, c, d] backfills only the
         // ids vector missed (a, d), in keyword order, after the vector block.
-        let keyword = FakeKeyword(vec!["a", "b", "c", "d"]);
-        let vectors = FakeVectors(vec!["c", "b", "e"]);
+        let keyword = FakeKeyword(vec![ID_A, ID_B, ID_C, ID_D]);
+        let vectors = FakeVectors(vec![ID_C.to_string(), ID_B.to_string(), ID_E.to_string()]);
         let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, "q", 4)
             .await
             .unwrap();
         assert_eq!(
             ids,
-            vec![
-                "c".to_string(),
-                "b".to_string(),
-                "e".to_string(),
-                "a".to_string()
-            ],
+            vec![nid(ID_C), nid(ID_B), nid(ID_E), nid(ID_A)],
             "vector order preserved; keyword-only ids backfill in order; truncated to k=4"
         );
     }
 
     #[tokio::test]
     async fn hybrid_candidates_returns_the_untruncated_union() {
-        let keyword = FakeKeyword(vec!["a", "b"]);
-        let vectors = FakeVectors(vec!["b", "c"]);
+        let keyword = FakeKeyword(vec![ID_A, ID_B]);
+        let vectors = FakeVectors(vec![ID_B.to_string(), ID_C.to_string()]);
         let ids = hybrid_candidates(&keyword, &vectors, &FakeEmbed, "q", 20)
             .await
             .unwrap();
         assert_eq!(
             ids,
-            vec!["b".to_string(), "c".to_string(), "a".to_string()],
+            vec![nid(ID_B), nid(ID_C), nid(ID_A)],
             "full union, vector-first, keyword backfill, no truncation"
         );
     }
@@ -189,14 +225,14 @@ mod tests {
     #[tokio::test]
     async fn hybrid_is_vector_primary_with_keyword_backfill() {
         // vector: [b, c] is authoritative; keyword-only "a" backfills after it.
-        let keyword = FakeKeyword(vec!["a", "b"]);
-        let vectors = FakeVectors(vec!["b", "c"]);
+        let keyword = FakeKeyword(vec![ID_A, ID_B]);
+        let vectors = FakeVectors(vec![ID_B.to_string(), ID_C.to_string()]);
         let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, "q", 3)
             .await
             .unwrap();
         assert_eq!(
             ids,
-            vec!["b".to_string(), "c".to_string(), "a".to_string()],
+            vec![nid(ID_B), nid(ID_C), nid(ID_A)],
             "vector order preserved, keyword-only ids appended"
         );
     }
@@ -205,11 +241,46 @@ mod tests {
     async fn hybrid_falls_back_to_keyword_when_no_vectors() {
         // Cold start: embeddings not computed yet, so vector returns nothing and keyword
         // carries the results — search still works.
-        let keyword = FakeKeyword(vec!["a", "b"]);
+        let keyword = FakeKeyword(vec![ID_A, ID_B]);
         let vectors = FakeVectors(vec![]);
         let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, "q", 3)
             .await
             .unwrap();
-        assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(ids, vec![nid(ID_A), nid(ID_B)]);
+    }
+
+    #[tokio::test]
+    async fn hybrid_candidates_rolls_up_chunk_ids_with_min_rank() {
+        // Vector returns chunk IDs for the same note twice; first occurrence (min-rank) wins.
+        let keyword = FakeKeyword(vec![ID_C]); // backfill
+        let vectors = FakeVectors(vec![
+            format!("{ID_A}#0"),
+            format!("{ID_B}#1"),
+            format!("{ID_A}#2"),
+        ]);
+        let ids = hybrid_candidates(&keyword, &vectors, &FakeEmbed, "q", 20)
+            .await
+            .unwrap();
+        assert_eq!(
+            ids,
+            vec![nid(ID_A), nid(ID_B), nid(ID_C)],
+            "duplicate note-a rolled up to first (min-rank) occurrence; keyword backfills c"
+        );
+    }
+
+    #[tokio::test]
+    async fn hybrid_candidates_never_emits_raw_chunk_ids() {
+        let keyword = FakeKeyword(vec![]);
+        let vectors = FakeVectors(vec![format!("{ID_A}#0"), format!("{ID_B}#1")]);
+        let ids = hybrid_candidates(&keyword, &vectors, &FakeEmbed, "q", 20)
+            .await
+            .unwrap();
+        for id in &ids {
+            assert!(
+                !id.to_string().contains('#'),
+                "output must be bare NoteId, not a chunk ID"
+            );
+        }
+        assert_eq!(ids, vec![nid(ID_A), nid(ID_B)]);
     }
 }

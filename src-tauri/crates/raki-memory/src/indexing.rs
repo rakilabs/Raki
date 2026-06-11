@@ -9,17 +9,9 @@ use raki_domain::{
 
 use crate::chunk_note;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct EmbedConfig {
     pub use_contextual_prefix: bool,
-}
-
-impl Default for EmbedConfig {
-    fn default() -> Self {
-        Self {
-            use_contextual_prefix: false,
-        }
-    }
 }
 
 /// Outcome of one drain.
@@ -78,9 +70,7 @@ async fn embed_one(
 ) -> Result<bool, DomainError> {
     let chunks = chunk_note(&note.title, &note.body, config.use_contextual_prefix);
     if chunks.is_empty() {
-        vectors
-            .delete_by_prefix(&format!("{}#", note.id))
-            .await?;
+        vectors.delete_by_prefix(&format!("{}#", note.id)).await?;
         return store
             .mark_embedded(&note.id, &note.content_hash, &embedder.model_id())
             .await;
@@ -94,9 +84,7 @@ async fn embed_one(
         )));
     }
 
-    vectors
-        .delete_by_prefix(&format!("{}#", note.id))
-        .await?;
+    vectors.delete_by_prefix(&format!("{}#", note.id)).await?;
 
     let items: Vec<(String, raki_domain::Embedding)> = embeddings
         .into_iter()
@@ -204,10 +192,7 @@ mod tests {
             self.deletes.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
-        async fn upsert_batch(
-            &self,
-            items: &[(String, Embedding)],
-        ) -> Result<(), DomainError> {
+        async fn upsert_batch(&self, items: &[(String, Embedding)]) -> Result<(), DomainError> {
             self.upserts.fetch_add(items.len(), Ordering::SeqCst);
             Ok(())
         }
@@ -298,7 +283,11 @@ mod tests {
         assert!(result);
 
         // No embedder call because chunks are empty
-        assert_eq!(embedder.call_count(), 0, "expected no embedder call for empty chunks");
+        assert_eq!(
+            embedder.call_count(),
+            0,
+            "expected no embedder call for empty chunks"
+        );
         // delete_by_prefix called once for cleanup
         assert_eq!(vectors.delete_count(), 1, "expected 1 delete_by_prefix");
         // No upserts
@@ -331,7 +320,11 @@ mod tests {
         assert!(!result);
 
         // One delete before upsert; no compensating delete after stamp failure
-        assert_eq!(vectors.delete_count(), 1, "expected exactly 1 delete_by_prefix");
+        assert_eq!(
+            vectors.delete_count(),
+            1,
+            "expected exactly 1 delete_by_prefix"
+        );
         assert_eq!(vectors.upsert_count(), 1, "expected 1 upsert");
         assert_eq!(embedder.call_count(), 1, "expected 1 embedder call");
     }

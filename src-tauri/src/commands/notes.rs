@@ -88,9 +88,8 @@ async fn search_reranked(
 
     // 2. Hydrate pool ids → Notes in pool order; skip any deleted mid-flight.
     let mut hydrated: Vec<Note> = Vec::with_capacity(pool.len());
-    for id in &pool {
-        let nid = NoteId::parse(id)?;
-        if let Some(note) = notes.get(&nid).await? {
+    for nid in &pool {
+        if let Some(note) = notes.get(nid).await? {
             hydrated.push(note);
         }
     }

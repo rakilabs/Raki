@@ -173,8 +173,8 @@ impl NoteRepository for SqliteNoteRepository {
                 if changed > 0 {
                     tx.execute("DELETE FROM notes_fts WHERE note_id = ?1", params![id_str])?;
                     tx.execute(
-                        "DELETE FROM note_vectors WHERE note_id = ?1",
-                        params![id_str],
+                        "DELETE FROM chunk_vectors WHERE chunk_id LIKE ?1",
+                        params![format!("{}#%", id_str)],
                     )?;
                 }
                 tx.commit()?;
@@ -379,8 +379,8 @@ mod tests {
         let id = note_id.to_string();
         db.call(move |c| {
             c.query_row(
-                "SELECT count(*) FROM note_vectors WHERE note_id = ?1",
-                rusqlite::params![id],
+                "SELECT count(*) FROM chunk_vectors WHERE chunk_id LIKE ?1",
+                rusqlite::params![format!("{}#%", id)],
                 |r| r.get(0),
             )
         })
@@ -400,8 +400,8 @@ mod tests {
         db.call(move |c| {
             let blob = vec![0u8; 384 * 4];
             c.execute(
-                "INSERT INTO note_vectors (note_id, embedding) VALUES (?1, ?2)",
-                rusqlite::params![id_str, blob],
+                "INSERT INTO chunk_vectors (chunk_id, embedding) VALUES (?1, ?2)",
+                rusqlite::params![format!("{}#0", id_str), blob],
             )?;
             Ok(())
         })
