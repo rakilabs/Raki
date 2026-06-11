@@ -45,6 +45,70 @@ fn collect_text(node: &Value, out: &mut String) {
     }
 }
 
+/// A structural block extracted from a ProseMirror document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Block {
+    /// The most recent heading text that precedes this block in the document.
+    pub heading: Option<String>,
+    /// The plain text content of the block.
+    pub text: String,
+}
+
+/// Parse a canonical ProseMirror `doc` into structural blocks.
+///
+/// - `paragraph` → one block
+/// - `bulletList` / `orderedList` → one block (list items joined with `\n`)
+/// - `codeBlock` → one block
+/// - `heading` → updates the running heading context for subsequent blocks (not emitted)
+/// - other nodes → skipped
+/// - invalid JSON or non-doc → empty vec
+pub fn body_to_blocks(body: &str) -> Vec<Block> {
+    let Ok(value) = serde_json::from_str::<Value>(body) else {
+        return Vec::new();
+    };
+    if value.get("type").and_then(Value::as_str) != Some("doc") {
+        return Vec::new();
+    }
+    let mut blocks: Vec<Block> = Vec::new();
+    let mut current_heading: Option<String> = None;
+    if let Some(content) = value.get("content").and_then(Value::as_array) {
+        for node in content {
+            let node_type = node.get("type").and_then(Value::as_str);
+            match node_type {
+                Some("heading") => {
+                    let mut text = String::new();
+                    collect_text(node, &mut text);
+                    current_heading = Some(text);
+                }
+                Some("paragraph") | Some("codeBlock") => {
+                    let mut text = String::new();
+                    collect_text(node, &mut text);
+                    blocks.push(Block {
+                        heading: current_heading.clone(),
+                        text,
+                    });
+                }
+                Some("bulletList") | Some("orderedList") => {
+                    let mut items: Vec<String> = Vec::new();
+                    if let Some(list_content) = node.get("content").and_then(Value::as_array) {
+                        for item in list_content {
+                            let mut item_text = String::new();
+                            collect_text(item, &mut item_text);
+                            items.push(item_text);
+                        }
+                    }
+                    blocks.push(Block {
+                        heading: current_heading.clone(),
+                        text: items.join("\n"),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+    blocks
+}
+
 /// Wrap plain editor text into a canonical ProseMirror `doc`: one `paragraph` per line,
 /// each holding a single `text` node (empty lines → empty paragraphs). Empty input → an
 /// empty `doc`. Inverse of `body_to_text` for line-separated plain text.
@@ -114,5 +178,50 @@ mod tests {
     #[test]
     fn text_to_body_emits_a_canonical_doc() {
         assert_eq!(text_to_body(""), r#"{"content":[],"type":"doc"}"#);
+    }
+
+    #[test]
+    fn body_to_blocks_extracts_paragraphs() {
+        let doc = r#"{"type":"doc","content":[
+            {"type":"paragraph","content":[{"type":"text","text":"first"}]},
+            {"type":"paragraph","content":[{"type":"text","text":"second"}]}
+        ]}"#;
+        let blocks = body_to_blocks(doc);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].heading, None);
+        assert_eq!(blocks[0].text, "first");
+        assert_eq!(blocks[1].heading, None);
+        assert_eq!(blocks[1].text, "second");
+    }
+
+    #[test]
+    fn body_to_blocks_joins_list_items() {
+        let doc = r#"{"type":"doc","content":[
+            {"type":"bulletList","content":[
+                {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"milk"}]}]},
+                {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"eggs"}]}]}
+            ]}
+        ]}"#;
+        let blocks = body_to_blocks(doc);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].text, "milk\neggs");
+    }
+
+    #[test]
+    fn body_to_blocks_tracks_headings() {
+        let doc = r#"{"type":"doc","content":[
+            {"type":"heading","content":[{"type":"text","text":"Intro"}]},
+            {"type":"paragraph","content":[{"type":"text","text":"body"}]}
+        ]}"#;
+        let blocks = body_to_blocks(doc);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].heading, Some("Intro".to_string()));
+        assert_eq!(blocks[0].text, "body");
+    }
+
+    #[test]
+    fn body_to_blocks_returns_empty_for_invalid_json() {
+        let blocks = body_to_blocks("not json");
+        assert!(blocks.is_empty());
     }
 }

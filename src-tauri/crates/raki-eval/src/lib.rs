@@ -391,14 +391,18 @@ pub async fn run_eval_over(
                 &q.query,
                 cov_k.max(k),
             )
-            .await?,
+            .await?
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>(),
             &fixture_of,
         ));
         let raw_pool =
             hybrid_candidates(&keyword, &vectors, embedder.as_ref(), &q.query, RERANK_POOL).await?;
         let candidates: Vec<(String, String)> = raw_pool
             .iter()
-            .filter_map(|id| text_of.get(id).map(|t| (id.clone(), t.clone())))
+            .map(|id| id.to_string())
+            .filter_map(|id_str| text_of.get(&id_str).map(|t| (id_str, t.clone())))
             .collect();
         let rr = match rollup {
             Rollup::MinRank => dedup_to_note(&to_fixture(
