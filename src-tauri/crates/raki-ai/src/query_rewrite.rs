@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use lru::LruCache;
 
 use raki_domain::{
-    CompletionRequest, DomainError, EgressDecision, EgressError, SourceId,
-    QueryRewriter, QueryUnderstanding,
+    CompletionRequest, DomainError, EgressDecision, EgressError, QueryRewriter, QueryUnderstanding,
+    SourceId,
 };
 
 use crate::GatedLlmProvider;
@@ -91,7 +91,8 @@ impl QueryRewriter for CloudQueryRewriter {
         };
 
         let start = Instant::now();
-        let result = tokio::time::timeout(REWRITE_TIMEOUT, self.gate.complete_gated(&decision, req)).await;
+        let result =
+            tokio::time::timeout(REWRITE_TIMEOUT, self.gate.complete_gated(&decision, req)).await;
         let understanding = match result {
             Ok(Ok((completion, _))) => parse_understanding(&completion.text, query),
             Ok(Err(EgressError::Denied(_))) => Ok(QueryUnderstanding::pass_through(query)),
@@ -107,7 +108,10 @@ impl QueryRewriter for CloudQueryRewriter {
             "query_rewrite"
         );
 
-        self.cache.lock().unwrap_or_else(|e| e.into_inner()).put(query.to_string(), (understanding.clone(), Instant::now()));
+        self.cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .put(query.to_string(), (understanding.clone(), Instant::now()));
         Ok(understanding)
     }
 }
@@ -219,7 +223,8 @@ mod tests {
 
     #[test]
     fn parse_nan_confidence_clamped() {
-        let raw = r#"{"rewritten_query":"x","needs_multi_hop":false,"sub_queries":[],"confidence":null}"#;
+        let raw =
+            r#"{"rewritten_query":"x","needs_multi_hop":false,"sub_queries":[],"confidence":null}"#;
         let u = parse_understanding(raw, "q").unwrap();
         assert_eq!(u.confidence, 0.0);
     }
@@ -231,13 +236,11 @@ mod tests {
         assert_eq!(truncated.chars().count(), MAX_QUERY_LEN);
     }
 
-    use std::sync::Arc;
     use crate::testing::FakeLlmProvider;
-    use raki_domain::{
-        DomainError, EgressLog, EgressLogId, EgressRecord, EgressSettings,
-    };
     use raki_domain::testing::FixedClock;
+    use raki_domain::{DomainError, EgressLog, EgressLogId, EgressRecord, EgressSettings};
     use std::collections::HashSet;
+    use std::sync::Arc;
 
     fn make_rewriter(response: &str) -> CloudQueryRewriter {
         let fake = Arc::new(FakeLlmProvider::ok(response));
@@ -257,8 +260,12 @@ mod tests {
         async fn consented(&self) -> Result<HashSet<String>, DomainError> {
             Ok(HashSet::from(["test".to_string()]))
         }
-        async fn grant(&self, _: &str) -> Result<(), DomainError> { Ok(()) }
-        async fn revoke(&self, _: &str) -> Result<(), DomainError> { Ok(()) }
+        async fn grant(&self, _: &str) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn revoke(&self, _: &str) -> Result<(), DomainError> {
+            Ok(())
+        }
     }
 
     #[derive(Default)]
@@ -268,22 +275,34 @@ mod tests {
         async fn consented(&self) -> Result<HashSet<String>, DomainError> {
             Ok(HashSet::new())
         }
-        async fn grant(&self, _: &str) -> Result<(), DomainError> { Ok(()) }
-        async fn revoke(&self, _: &str) -> Result<(), DomainError> { Ok(()) }
+        async fn grant(&self, _: &str) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn revoke(&self, _: &str) -> Result<(), DomainError> {
+            Ok(())
+        }
     }
 
     #[derive(Default)]
     struct NoopLog;
     #[async_trait::async_trait]
     impl EgressLog for NoopLog {
-        async fn record(&self, _: &EgressRecord) -> Result<(), DomainError> { Ok(()) }
-        async fn set_grounded(&self, _: &EgressLogId, _: bool) -> Result<(), DomainError> { Ok(()) }
-        async fn list_recent(&self, _: usize) -> Result<Vec<EgressRecord>, DomainError> { Ok(vec![]) }
+        async fn record(&self, _: &EgressRecord) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn set_grounded(&self, _: &EgressLogId, _: bool) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn list_recent(&self, _: usize) -> Result<Vec<EgressRecord>, DomainError> {
+            Ok(vec![])
+        }
     }
 
     #[tokio::test]
     async fn rewriter_returns_structured_output() {
-        let rw = make_rewriter(r#"{"rewritten_query":"payment cash","needs_multi_hop":false,"sub_queries":[],"confidence":0.9}"#);
+        let rw = make_rewriter(
+            r#"{"rewritten_query":"payment cash","needs_multi_hop":false,"sub_queries":[],"confidence":0.9}"#,
+        );
         let u = rw.understand("how pay?").await.unwrap();
         assert_eq!(u.rewritten_query, "payment cash");
         assert!(!u.is_fallback);
@@ -291,7 +310,9 @@ mod tests {
 
     #[tokio::test]
     async fn rewriter_caches_results() {
-        let fake = Arc::new(FakeLlmProvider::ok(r#"{"rewritten_query":"cached","needs_multi_hop":false,"sub_queries":[],"confidence":0.9}"#));
+        let fake = Arc::new(FakeLlmProvider::ok(
+            r#"{"rewritten_query":"cached","needs_multi_hop":false,"sub_queries":[],"confidence":0.9}"#,
+        ));
         let gate = Arc::new(GatedLlmProvider::new(
             fake.clone(),
             Arc::new(AlwaysConsented),

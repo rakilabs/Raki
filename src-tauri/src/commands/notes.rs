@@ -84,7 +84,8 @@ async fn search_reranked(
     query: &str,
 ) -> Result<Vec<Note>, DomainError> {
     // 1. Recall union (unchanged retrieval fn).
-    let pool = raki_retrieval::hybrid_candidates(keyword, vectors, embedder, None, query, POOL).await?;
+    let pool =
+        raki_retrieval::hybrid_candidates(keyword, vectors, embedder, None, query, POOL).await?;
 
     // 2. Hydrate pool ids → Notes in pool order; skip any deleted mid-flight.
     let mut hydrated: Vec<Note> = Vec::with_capacity(pool.len());

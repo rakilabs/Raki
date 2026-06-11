@@ -274,8 +274,15 @@ pub async fn run_benchmark(
                 .collect::<Vec<_>>(),
         );
         // Rerank the recall union, then map to beir ids.
-        let pool =
-            hybrid_candidates(&keyword, &vectors, embedder.as_ref(), None, qtext, RERANK_POOL).await?;
+        let pool = hybrid_candidates(
+            &keyword,
+            &vectors,
+            embedder.as_ref(),
+            None,
+            qtext,
+            RERANK_POOL,
+        )
+        .await?;
         let candidates: Vec<(String, String)> = pool
             .iter()
             .map(|id| id.to_string())

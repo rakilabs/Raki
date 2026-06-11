@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use raki_ai::GatedLlmProvider;
 use raki_domain::{
-    Clock, EgressLog, EgressSettings, EmbeddingProvider, KeywordIndex, NoteRepository, QueryRewriter,
-    Reranker, VectorIndex,
+    Clock, EgressLog, EgressSettings, EmbeddingProvider, KeywordIndex, NoteRepository,
+    QueryRewriter, Reranker, VectorIndex,
 };
 
 use crate::indexing::IndexingService;

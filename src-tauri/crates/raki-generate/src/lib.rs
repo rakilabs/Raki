@@ -67,9 +67,16 @@ pub async fn assemble_for(
     query: &str,
     deps: &GenerateDeps<'_>,
 ) -> Result<Option<(AssembledContext, std::collections::HashMap<String, String>)>, GenerateError> {
-    let ids = hybrid_search(deps.keyword, deps.vectors, deps.embedder, deps.rewriter, query, deps.k)
-        .await
-        .map_err(GenerateError::Domain)?;
+    let ids = hybrid_search(
+        deps.keyword,
+        deps.vectors,
+        deps.embedder,
+        deps.rewriter,
+        query,
+        deps.k,
+    )
+    .await
+    .map_err(GenerateError::Domain)?;
 
     let mut candidates = Vec::new();
     let mut titles = std::collections::HashMap::new();

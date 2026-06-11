@@ -74,8 +74,8 @@ use std::sync::Arc;
 use crate::chunk::{chunk, ChunkStrategy, PrefixMode, Rollup};
 use async_trait::async_trait;
 use raki_domain::{
-    DomainError, EmbeddingProvider, Note, NoteId, NoteRepository, QueryRewriter, QueryUnderstanding,
-    Reranker, VectorIndex,
+    DomainError, EmbeddingProvider, Note, NoteId, NoteRepository, QueryRewriter,
+    QueryUnderstanding, Reranker, VectorIndex,
 };
 use raki_retrieval::{
     average_precision_at_k, hybrid_candidates, hybrid_search, ndcg_at_k, recall_at_k,
@@ -96,8 +96,9 @@ impl QueryRewriter for RuleBasedRewriter {
         let rewritten = if lowered.contains("inn") {
             lowered.replace("inn", "ryokan")
         } else if lowered.contains("spend") || lowered.contains("spent") {
-            lowered.replace("spend", "expenses")
-                 .replace("spent", "expenses")
+            lowered
+                .replace("spend", "expenses")
+                .replace("spent", "expenses")
         } else {
             lowered.clone()
         };
@@ -430,8 +431,15 @@ pub async fn run_eval_over(
             .collect::<Vec<_>>(),
             &fixture_of,
         ));
-        let raw_pool =
-            hybrid_candidates(&keyword, &vectors, embedder.as_ref(), rewriter, &q.query, RERANK_POOL).await?;
+        let raw_pool = hybrid_candidates(
+            &keyword,
+            &vectors,
+            embedder.as_ref(),
+            rewriter,
+            &q.query,
+            RERANK_POOL,
+        )
+        .await?;
         let candidates: Vec<(String, String)> = raw_pool
             .iter()
             .map(|id| id.to_string())
