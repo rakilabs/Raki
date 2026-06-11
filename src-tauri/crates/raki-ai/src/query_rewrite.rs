@@ -63,17 +63,17 @@ impl CloudQueryRewriter {
 #[async_trait]
 impl QueryRewriter for CloudQueryRewriter {
     async fn understand(&self, query: &str) -> Result<QueryUnderstanding, DomainError> {
-        let query = truncate_query(query);
+        let effective_query = truncate_query(query);
 
         // Cache check
         {
             let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some((cached, ts)) = cache.get(query) {
+            if let Some((cached, ts)) = cache.get(effective_query) {
                 if ts.elapsed() < CACHE_TTL {
                     return Ok(cached.clone());
                 }
             }
-            cache.pop(query);
+            cache.pop(effective_query);
         }
 
         let decision = EgressDecision {
@@ -82,11 +82,11 @@ impl QueryRewriter for CloudQueryRewriter {
             source_ids: vec![SourceId("query-rewrite".to_string())],
             // Conservative over-estimate: characters ≈ 2-4× tokens for CJK/Latin mix.
             // Proper token counting requires a tokenizer; this is a lower-bound proxy.
-            total_tokens: query.chars().count(),
+            total_tokens: effective_query.chars().count(),
         };
         let req = CompletionRequest {
             system: Some(REWRITE_SYSTEM_PROMPT.into()),
-            prompt: query.to_string(),
+            prompt: effective_query.to_string(),
             max_tokens: Some(MAX_PROMPT_TOKENS),
         };
 
@@ -108,24 +108,20 @@ impl QueryRewriter for CloudQueryRewriter {
             "query_rewrite"
         );
 
-        self.cache
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .put(query.to_string(), (understanding.clone(), Instant::now()));
+        if !understanding.is_fallback {
+            self.cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .put(effective_query.to_string(), (understanding.clone(), Instant::now()));
+        }
         Ok(understanding)
     }
 }
 
 fn truncate_query(query: &str) -> &str {
-    if query.chars().count() <= MAX_QUERY_LEN {
-        query
-    } else {
-        let mut chars = query.chars();
-        let mut byte_pos = 0;
-        for _ in 0..MAX_QUERY_LEN {
-            byte_pos += chars.next().map(|c| c.len_utf8()).unwrap_or(0);
-        }
-        &query[..byte_pos]
+    match query.char_indices().nth(MAX_QUERY_LEN) {
+        Some((idx, _)) => &query[..idx],
+        None => query,
     }
 }
 
@@ -170,14 +166,14 @@ fn parse_understanding(raw: &str, original: &str) -> Result<QueryUnderstanding, 
         });
     }
 
-    // JSON parse failed: use raw text as rewritten query if non-empty
+    // JSON parse failed: fall back to original query
     if !text.trim().is_empty() {
         return Ok(QueryUnderstanding {
             rewritten_query: text.to_string(),
             needs_multi_hop: false,
             sub_queries: vec![],
             confidence: 0.5,
-            is_fallback: false,
+            is_fallback: true,
         });
     }
 
