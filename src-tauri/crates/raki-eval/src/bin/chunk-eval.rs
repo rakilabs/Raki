@@ -55,6 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ChunkStrategy::WholeNote,
         PrefixMode::Title,
         Rollup::MinRank,
+        None,
     )
     .await?;
 
@@ -94,6 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ChunkStrategy::Blocks,
                 p,
                 r,
+                None,
             )
             .await?;
             arms.push((format!("{pl}/{rl}"), chunked.report));
@@ -138,6 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ChunkStrategy::WholeNote,
                 PrefixMode::Title,
                 Rollup::MinRank,
+                None,
             )
             .await?;
             for (pl, p) in prefixes {
@@ -151,6 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ChunkStrategy::Blocks,
                         p,
                         r,
+                        None,
                     )
                     .await?;
                     println!("## REAL prefix={pl} rollup={rl}");

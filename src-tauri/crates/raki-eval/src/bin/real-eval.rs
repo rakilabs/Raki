@@ -78,6 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         raki_eval::chunk::ChunkStrategy::WholeNote,
         raki_eval::chunk::PrefixMode::Title,
         raki_eval::chunk::Rollup::MinRank,
+        None,
     )
     .await?;
 

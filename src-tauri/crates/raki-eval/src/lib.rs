@@ -72,14 +72,42 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::chunk::{chunk, ChunkStrategy, PrefixMode, Rollup};
+use async_trait::async_trait;
 use raki_domain::{
-    DomainError, EmbeddingProvider, Note, NoteId, NoteRepository, Reranker, VectorIndex,
+    DomainError, EmbeddingProvider, Note, NoteId, NoteRepository, QueryRewriter, QueryUnderstanding,
+    Reranker, VectorIndex,
 };
 use raki_retrieval::{
     average_precision_at_k, hybrid_candidates, hybrid_search, ndcg_at_k, recall_at_k,
     reciprocal_rank, rerank, search, vector_search,
 };
 use raki_storage::{Database, SqliteKeywordIndex, SqliteNoteRepository, SqliteVectorIndex};
+
+/// Deterministic, no-LLM rewriter for CI-stable eval gates.
+pub struct RuleBasedRewriter;
+
+#[async_trait]
+impl QueryRewriter for RuleBasedRewriter {
+    async fn understand(&self, query: &str) -> Result<QueryUnderstanding, DomainError> {
+        let lowered = query.to_lowercase();
+        let rewritten = if lowered.contains("inn") {
+            query.replace("inn", "ryokan")
+        } else if lowered.contains("spend") || lowered.contains("spent") {
+            query.replace("spend", "expenses")
+                 .replace("spent", "expenses")
+        } else {
+            query.to_string()
+        };
+        let changed = rewritten != query;
+        Ok(QueryUnderstanding {
+            rewritten_query: rewritten,
+            needs_multi_hop: false,
+            sub_queries: vec![],
+            confidence: if changed { 0.8 } else { 0.0 },
+            is_fallback: !changed,
+        })
+    }
+}
 
 /// Mean metrics for one retrieval method over a set of (scored) queries.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -300,6 +328,7 @@ pub async fn run_eval_over(
     strategy: ChunkStrategy,
     prefix: PrefixMode,
     rollup: Rollup,
+    rewriter: Option<&dyn QueryRewriter>,
 ) -> Result<EvalRun, DomainError> {
     let (_db, repo, keyword, vectors) = build_in_memory_index()?;
 
@@ -388,7 +417,7 @@ pub async fn run_eval_over(
                 &keyword,
                 &vectors,
                 embedder.as_ref(),
-                None,
+                rewriter,
                 &q.query,
                 cov_k.max(k),
             )
@@ -399,7 +428,7 @@ pub async fn run_eval_over(
             &fixture_of,
         ));
         let raw_pool =
-            hybrid_candidates(&keyword, &vectors, embedder.as_ref(), None, &q.query, RERANK_POOL).await?;
+            hybrid_candidates(&keyword, &vectors, embedder.as_ref(), rewriter, &q.query, RERANK_POOL).await?;
         let candidates: Vec<(String, String)> = raw_pool
             .iter()
             .map(|id| id.to_string())
@@ -471,6 +500,27 @@ pub async fn run_eval(
         ChunkStrategy::WholeNote,
         PrefixMode::Title,
         Rollup::MinRank,
+        None,
+    )
+    .await
+}
+
+/// Eval over the committed synthetic fixtures WITH the rule-based rewriter.
+pub async fn run_eval_with_rewrite(
+    embedder: Arc<dyn EmbeddingProvider>,
+    reranker: Arc<dyn Reranker>,
+    k: usize,
+) -> Result<EvalRun, DomainError> {
+    run_eval_over(
+        &load_corpus(),
+        &load_queries(),
+        embedder,
+        reranker,
+        k,
+        ChunkStrategy::WholeNote,
+        PrefixMode::Title,
+        Rollup::MinRank,
+        Some(&RuleBasedRewriter),
     )
     .await
 }
@@ -611,6 +661,14 @@ mod tests {
 
     use raki_ai::{FakeEmbeddingProvider, FakeReranker};
     use std::sync::Arc;
+
+    #[tokio::test]
+    async fn rule_based_rewriter_expands_inn() {
+        let rw = RuleBasedRewriter;
+        let u = rw.understand("how do I pay at the inn?").await.unwrap();
+        assert!(u.rewritten_query.contains("ryokan"));
+        assert!(!u.is_fallback);
+    }
 
     #[tokio::test]
     async fn harness_scores_every_category_with_fake_embedder() {

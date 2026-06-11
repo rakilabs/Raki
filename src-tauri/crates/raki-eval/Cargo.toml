@@ -36,5 +36,6 @@ pulldown-cmark = { version = "0.12", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+async-trait = { workspace = true }
 ureq = "3.3.0"
 zip = "8.6.0"
