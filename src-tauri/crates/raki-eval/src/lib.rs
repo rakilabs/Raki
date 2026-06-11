@@ -388,6 +388,7 @@ pub async fn run_eval_over(
                 &keyword,
                 &vectors,
                 embedder.as_ref(),
+                None,
                 &q.query,
                 cov_k.max(k),
             )
@@ -398,7 +399,7 @@ pub async fn run_eval_over(
             &fixture_of,
         ));
         let raw_pool =
-            hybrid_candidates(&keyword, &vectors, embedder.as_ref(), &q.query, RERANK_POOL).await?;
+            hybrid_candidates(&keyword, &vectors, embedder.as_ref(), None, &q.query, RERANK_POOL).await?;
         let candidates: Vec<(String, String)> = raw_pool
             .iter()
             .map(|id| id.to_string())

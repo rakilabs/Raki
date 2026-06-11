@@ -306,14 +306,53 @@ mod tests {
         assert_eq!(ids, vec![nid(ID_A), nid(ID_B)]);
     }
 
-    struct FakeRewriter(&'static str);
+    struct FakeRewriter {
+        query: &'static str,
+        is_fallback: bool,
+    }
     #[async_trait]
     impl raki_domain::QueryRewriter for FakeRewriter {
         async fn understand(&self, _query: &str) -> Result<QueryUnderstanding, DomainError> {
             Ok(QueryUnderstanding {
-                rewritten_query: self.0.to_string(),
+                rewritten_query: self.query.to_string(),
                 needs_multi_hop: false,
                 sub_queries: vec![],
+                confidence: 0.9,
+                is_fallback: self.is_fallback,
+            })
+        }
+    }
+
+    struct FallbackRewriter;
+    #[async_trait]
+    impl raki_domain::QueryRewriter for FallbackRewriter {
+        async fn understand(&self, _query: &str) -> Result<QueryUnderstanding, DomainError> {
+            Ok(QueryUnderstanding {
+                rewritten_query: "ignored".to_string(),
+                needs_multi_hop: false,
+                sub_queries: vec![],
+                confidence: 0.9,
+                is_fallback: true,
+            })
+        }
+    }
+
+    struct ErrorRewriter;
+    #[async_trait]
+    impl raki_domain::QueryRewriter for ErrorRewriter {
+        async fn understand(&self, _query: &str) -> Result<QueryUnderstanding, DomainError> {
+            Err(DomainError::Provider("test error".to_string()))
+        }
+    }
+
+    struct MultiHopRewriter;
+    #[async_trait]
+    impl raki_domain::QueryRewriter for MultiHopRewriter {
+        async fn understand(&self, _query: &str) -> Result<QueryUnderstanding, DomainError> {
+            Ok(QueryUnderstanding {
+                rewritten_query: "ignored".to_string(),
+                needs_multi_hop: true,
+                sub_queries: vec!["sub_a".to_string(), "sub_b".to_string()],
                 confidence: 0.9,
                 is_fallback: false,
             })
@@ -324,7 +363,24 @@ mod tests {
     async fn hybrid_search_uses_rewritten_query_when_rewriter_provided() {
         let keyword = FakeKeyword(vec![ID_A]);
         let vectors = FakeVectors(vec![ID_A.to_string()]);
-        let rewriter = FakeRewriter("explicit keyword");
+        let rewriter = FakeRewriter {
+            query: "explicit keyword",
+            is_fallback: false,
+        };
+        let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, Some(&rewriter), "vague", 3)
+            .await
+            .unwrap();
+        assert_eq!(ids, vec![nid(ID_A)]);
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_falls_back_when_rewriter_returns_empty_string() {
+        let keyword = FakeKeyword(vec![ID_A]);
+        let vectors = FakeVectors(vec![]);
+        let rewriter = FakeRewriter {
+            query: "",
+            is_fallback: false,
+        };
         let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, Some(&rewriter), "vague", 3)
             .await
             .unwrap();
@@ -335,9 +391,33 @@ mod tests {
     async fn hybrid_search_falls_back_when_rewriter_returns_fallback() {
         let keyword = FakeKeyword(vec![ID_A]);
         let vectors = FakeVectors(vec![]);
-        let rewriter = FakeRewriter(""); // empty → fallback
-        let _ = hybrid_search(&keyword, &vectors, &FakeEmbed, Some(&rewriter), "vague", 3)
+        let rewriter = FallbackRewriter;
+        let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, Some(&rewriter), "vague", 3)
             .await
             .unwrap();
+        assert_eq!(ids, vec![nid(ID_A)]);
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_falls_back_when_rewriter_errors() {
+        let keyword = FakeKeyword(vec![ID_A]);
+        let vectors = FakeVectors(vec![]);
+        let rewriter = ErrorRewriter;
+        let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, Some(&rewriter), "vague", 3)
+            .await
+            .unwrap();
+        assert_eq!(ids, vec![nid(ID_A)]);
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_uses_first_subquery_when_multi_hop() {
+        let keyword = FakeKeyword(vec![ID_A]);
+        let vectors = FakeVectors(vec![]);
+        let rewriter = MultiHopRewriter;
+        let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, Some(&rewriter), "vague", 3)
+            .await
+            .unwrap();
+        // sub_a matches via FakeKeyword
+        assert_eq!(ids, vec![nid(ID_A)]);
     }
 }

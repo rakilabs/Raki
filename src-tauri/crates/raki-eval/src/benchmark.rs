@@ -267,7 +267,7 @@ pub async fn run_benchmark(
         let kw_ids = to_beir(search(&keyword, qtext, k).await?);
         let vc_ids = to_beir(vector_search(&vectors, embedder.as_ref(), qtext, k).await?);
         let hy_ids = to_beir(
-            hybrid_search(&keyword, &vectors, embedder.as_ref(), qtext, k)
+            hybrid_search(&keyword, &vectors, embedder.as_ref(), None, qtext, k)
                 .await?
                 .into_iter()
                 .map(|id| id.to_string())
@@ -275,7 +275,7 @@ pub async fn run_benchmark(
         );
         // Rerank the recall union, then map to beir ids.
         let pool =
-            hybrid_candidates(&keyword, &vectors, embedder.as_ref(), qtext, RERANK_POOL).await?;
+            hybrid_candidates(&keyword, &vectors, embedder.as_ref(), None, qtext, RERANK_POOL).await?;
         let candidates: Vec<(String, String)> = pool
             .iter()
             .map(|id| id.to_string())

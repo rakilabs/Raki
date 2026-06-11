@@ -66,7 +66,7 @@ pub async fn assemble_for(
     query: &str,
     deps: &GenerateDeps<'_>,
 ) -> Result<Option<(AssembledContext, std::collections::HashMap<String, String>)>, GenerateError> {
-    let ids = hybrid_search(deps.keyword, deps.vectors, deps.embedder, query, deps.k)
+    let ids = hybrid_search(deps.keyword, deps.vectors, deps.embedder, None, query, deps.k)
         .await
         .map_err(GenerateError::Domain)?;
 
