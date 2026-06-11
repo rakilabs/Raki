@@ -113,7 +113,7 @@ pub fn run() {
                 Arc::new(SqliteEgressLog::new(db.clone()));
 
             let provider = "kimi".to_string();
-            let model = std::env::var("RAKI_LLM_MODEL").unwrap_or_else(|_| "unknown".to_string());
+            let model = std::env::var("RAKI_LLM_MODEL").unwrap_or_else(|_| "kimi-k2-5".to_string());
             let inner: Arc<dyn LlmProvider> = match MessagesProvider::from_env() {
                 Ok(p) => Arc::new(p),
                 Err(e) => {
