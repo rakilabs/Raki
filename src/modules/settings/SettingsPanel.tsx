@@ -1,10 +1,16 @@
+import {
+  createMutation,
+  createQuery,
+  useQueryClient,
+} from "@tanstack/solid-query";
 import { createSignal, For, Show } from "solid-js";
-import { createQuery, createMutation, useQueryClient } from "@tanstack/solid-query";
 import { settingsApi, settingsKeys } from "./api";
 
 export function SettingsPanel(props: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = createSignal<"privacy" | "audit">("privacy");
+  const [activeTab, setActiveTab] = createSignal<"privacy" | "audit">(
+    "privacy"
+  );
 
   const settings = createQuery(() => ({
     queryKey: settingsKeys.egress,
@@ -13,12 +19,14 @@ export function SettingsPanel(props: { onClose: () => void }) {
 
   const grant = createMutation(() => ({
     mutationFn: (provider: string) => settingsApi.grantConsent(provider),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.egress }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: settingsKeys.egress }),
   }));
 
   const revoke = createMutation(() => ({
     mutationFn: (provider: string) => settingsApi.revokeConsent(provider),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.egress }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: settingsKeys.egress }),
   }));
 
   const log = createQuery(() => ({
@@ -27,7 +35,10 @@ export function SettingsPanel(props: { onClose: () => void }) {
   }));
 
   return (
-    <div class="settings-overlay" onClick={(e) => e.target === e.currentTarget && props.onClose()}>
+    <div
+      class="settings-overlay"
+      onClick={(e) => e.target === e.currentTarget && props.onClose()}
+    >
       <div class="settings-panel">
         <header>
           <h2>Settings</h2>
@@ -35,10 +46,16 @@ export function SettingsPanel(props: { onClose: () => void }) {
         </header>
 
         <nav>
-          <button onClick={() => setActiveTab("privacy")} class={activeTab() === "privacy" ? "active" : ""}>
+          <button
+            onClick={() => setActiveTab("privacy")}
+            class={activeTab() === "privacy" ? "active" : ""}
+          >
             Privacy
           </button>
-          <button onClick={() => setActiveTab("audit")} class={activeTab() === "audit" ? "active" : ""}>
+          <button
+            onClick={() => setActiveTab("audit")}
+            class={activeTab() === "audit" ? "active" : ""}
+          >
             Audit Log
           </button>
         </nav>
@@ -46,8 +63,9 @@ export function SettingsPanel(props: { onClose: () => void }) {
         <Show when={activeTab() === "privacy"}>
           <section>
             <p>
-              Local providers (e.g., Ollama) run on your device and need no consent.
-              Cloud providers require your explicit approval before each can be used.
+              Local providers (e.g., Ollama) run on your device and need no
+              consent. Cloud providers require your explicit approval before
+              each can be used.
             </p>
 
             <h3>Cloud Provider Consent</h3>
@@ -57,11 +75,17 @@ export function SettingsPanel(props: { onClose: () => void }) {
                   <div>
                     <strong>kimi</strong>{" "}
                     {s().consented_providers.includes("kimi") ? (
-                      <button onClick={() => revoke.mutate("kimi")} disabled={revoke.isPending}>
+                      <button
+                        onClick={() => revoke.mutate("kimi")}
+                        disabled={revoke.isPending}
+                      >
                         Revoke
                       </button>
                     ) : (
-                      <button onClick={() => grant.mutate("kimi")} disabled={grant.isPending}>
+                      <button
+                        onClick={() => grant.mutate("kimi")}
+                        disabled={grant.isPending}
+                      >
                         Grant
                       </button>
                     )}

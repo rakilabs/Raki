@@ -1,4 +1,8 @@
-import { commands, type CreateNoteInput, type UpdateNoteInput } from "~/shared/ipc";
+import {
+  type CreateNoteInput,
+  commands,
+  type UpdateNoteInput,
+} from "~/shared/ipc";
 
 export const notesKeys = {
   all: ["notes"] as const,
@@ -8,6 +12,7 @@ export const notesKeys = {
 
 export const notesApi = {
   list: () => commands.listNotes(),
+  getNote: (id: string) => commands.getNote(id),
   create: (input: CreateNoteInput) => commands.createNote(input),
   search: (query: string) => commands.searchNotes(query),
   update: (input: UpdateNoteInput) => commands.updateNote(input),

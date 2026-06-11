@@ -6,4 +6,6 @@ import type { EgressPreviewDto } from "./EgressPreviewDto";
  * Either we need consent (and show what would leave), or we have an answer.
  * Tagged union so the frontend can pattern-match on `kind`.
  */
-export type AnswerOutcome = { "kind": "needs_consent", preview: EgressPreviewDto, } | { "kind": "answer", state: string, text: string, cited: Array<CitedNote>, };
+export type AnswerOutcome =
+  | { kind: "needs_consent"; preview: EgressPreviewDto }
+  | { kind: "answer"; state: string; text: string; cited: Array<CitedNote> };

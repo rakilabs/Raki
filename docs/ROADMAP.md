@@ -64,23 +64,32 @@ R1 carries the reranker as *attach-to-validate*, not yet attached.
 real-notes ground truth (P1); kill-switch armed. Spec/plan:
 `docs/superpowers/specs/2026-06-08-r1-reranker-attach-design.md`.
 
-### ✅ R2 — Chunk-level embeddings *(design-settled; migration P1-gated)*
+### ✅ R2 — Chunk-level embeddings *(production migration complete)*
 **Goal:** retire whole-note embedding; chunk notes. The `buried-fact-in-long-note` category is the
-tripwire. Chunking substrate + design space + promotion gate already exist (2026-06-06 chunking spec).
-**Status:** **Design-settled.** Synthetic whole-vs-chunked baseline recorded in
-`docs/eval/chunking-baseline.md` (winning arm noted there). The production one-to-many storage
-migration + the **binding verdict** are **gated on a real-notes corpus** (chunking spec D8: +0.05
-Success@3 on the long stratum, by 2026-09-06) — *not* decidable on public data (SciFact is unstructured;
-BEIR has no open long+structured set). Spec/plan:
-`docs/superpowers/specs/2026-06-10-r2-chunking-baseline-record-design.md`.
+tripwire.
+**Status:** **Done.** Production migration implemented and verified:
+- `chunk_vectors` vec0 table active; `note_vectors` preserved as stale backup.
+- ProseMirror-aware block chunking (`body_to_blocks`) → `cap_split` at 1600 chars → max 32 chunks.
+- `hybrid_candidates` / `hybrid_search` roll up chunk IDs via min-rank (first occurrence wins).
+- `soft_delete` cleans chunks via `LIKE 'note_id#%'`; re-index is delete-then-upsert atomic.
+- V7 migration: additive, forward-only, clears `embedded_hash` to trigger re-index.
+- **SQLite verification:** Kyoto test note (2597 chars) → **8 chunks**; Grocery List (181 chars) → **1 chunk**.
+- Deterministic suite green: `cargo test`, `clippy -D warnings`, `fmt --check`, `tsc --noEmit`.
+- Spec/plan: `docs/superpowers/specs/2026-06-10-r2-chunking-production-migration-design.md`.
 
-> **Cross-cutting:** both R1's reranker verdict and R2's chunking migration now wait on **real notes**,
-> whose enabler is **P1** (Track B) — making P1 the natural next critical-path slice. (P1 is scoped in
-> its own slice; the long-note stratum is defined in the 2026-06-06 chunking spec D7.)
+> **Binding verdict (D8):** the real-notes corpus Success@3 gate is still open — the migration is
+> shipped, but the +0.05 lift on the long stratum must be validated once real notes accumulate.
+> Chunking is feature-flagged (`use_contextual_prefix`, default OFF) for safe rollback.
 
-### 🔒 R3 — Generate-stage query understanding — blocked on R2
+> **Cross-cutting:** R2 unblocks **R3** (Track A). The real-notes corpus that feeds R0's faithful tier
+> and R2's binding verdict is still the enabler for measurement — P1 (Track B) remains the path to
+> trustworthy real-note dogfooding.
+
+### ⬜ R3 — Generate-stage query understanding
 **Goal:** LLM query rewriting / HyDE / multi-hop feeding the recall stage (ADR-0006 stage 3).
 **Exit:** measured lift over the R2 baseline.
+**Note:** Unblocked now that R2 chunking is in production. The HyDE/generated-query stage benefits
+from chunk-level recall because rewritten queries retrieve against the chunk index, not whole notes.
 
 ### 🔒 R4 — Memory lifecycle — blocked on R0
 **Goal:** grow `raki-memory` beyond context assembly — recency / salience / pinning signals feeding

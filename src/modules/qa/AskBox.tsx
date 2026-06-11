@@ -1,13 +1,17 @@
-import { createSignal, Show, For } from "solid-js";
-import { qaApi, type AnswerOutcome } from "./api";
+import { createSignal, For, Show } from "solid-js";
+import { type AnswerOutcome, qaApi } from "./api";
 
 const PROVIDER = "kimi";
 
 function errMessage(e: unknown): string {
-  return typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e);
+  return typeof e === "object" && e && "message" in e
+    ? String((e as { message: unknown }).message)
+    : String(e);
 }
 
-function isNeedsConsent(o: AnswerOutcome): o is Extract<AnswerOutcome, { kind: "needs_consent" }> {
+function isNeedsConsent(
+  o: AnswerOutcome
+): o is Extract<AnswerOutcome, { kind: "needs_consent" }> {
   return o.kind === "needs_consent";
 }
 
@@ -54,12 +58,18 @@ export function AskBox() {
     if (isNeedsConsent(o)) {
       return (
         <div>
-          <p>This will send to the cloud: <strong>{o.preview.summary}</strong></p>
+          <p>
+            This will send to the cloud: <strong>{o.preview.summary}</strong>
+          </p>
           <ul>
             <For each={o.preview.source_titles}>{(t) => <li>{t}</li>}</For>
           </ul>
-          <button type="button" disabled={pending()} onClick={confirmSend}>Send to cloud</button>
-          <button type="button" onClick={() => setOutcome(null)}>Stay local</button>
+          <button type="button" disabled={pending()} onClick={confirmSend}>
+            Send to cloud
+          </button>
+          <button type="button" onClick={() => setOutcome(null)}>
+            Stay local
+          </button>
         </div>
       );
     }
@@ -69,9 +79,7 @@ export function AskBox() {
         <Show when={o.cited.length > 0}>
           <p>Sources:</p>
           <ul>
-            <For each={o.cited}>
-              {(c) => <li>{c.title}</li>}
-            </For>
+            <For each={o.cited}>{(c) => <li>{c.title}</li>}</For>
           </ul>
         </Show>
       </div>
@@ -81,13 +89,20 @@ export function AskBox() {
   return (
     <section aria-label="Ask AI (experimental)">
       <h2>Ask your notes (experimental)</h2>
-      <form onSubmit={(e) => { e.preventDefault(); ask(); }}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          ask();
+        }}
+      >
         <input
           placeholder="Ask a question about your notes…"
           value={question()}
           onInput={(e) => setQuestion(e.currentTarget.value)}
         />
-        <button type="submit" disabled={pending()}>Ask</button>
+        <button type="submit" disabled={pending()}>
+          Ask
+        </button>
       </form>
 
       <Show when={error()}>{(msg) => <p role="alert">Error: {msg()}</p>}</Show>

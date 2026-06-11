@@ -10,20 +10,46 @@
     "serve": "vite preview",
     "tauri": "tauri",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "biome check",
+    "lint:fix": "biome check --write",
+    "format": "biome format --write",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "src/**/*.{ts,tsx,css}": [
+      "biome check --write"
+    ]
   },
   "license": "MIT",
   "dependencies": {
+    "@ark-ui/solid": "^5.37.1",
+    "@solidjs/router": "^0.16.1",
     "@tanstack/solid-query": "5.101.0",
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-opener": "^2.5.4",
-    "solid-js": "^1.9.13"
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "dompurify": "^3.4.9",
+    "lucide-solid": "^1.17.0",
+    "marked": "^18.0.5",
+    "solid-js": "^1.9.13",
+    "solid-sonner": "^0.3.1",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
     "@solidjs/testing-library": "^0.8.10",
+    "@tailwindcss/postcss": "^4.3.0",
     "@tauri-apps/cli": "^2.11.2",
     "@testing-library/jest-dom": "^6.9.1",
+    "@types/dompurify": "^3.2.0",
+    "@types/marked": "^6.0.0",
+    "husky": "^9.1.7",
     "jsdom": "^29.1.1",
+    "lint-staged": "^17.0.7",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
     "vite-plugin-solid": "^2.11.12",

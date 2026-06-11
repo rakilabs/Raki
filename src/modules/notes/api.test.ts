@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("~/shared/ipc", () => ({
   commands: {
@@ -26,8 +26,19 @@ describe("notesApi", () => {
   });
 
   it("update delegates to the updateNote command with the input", async () => {
-    mocked.updateNote.mockResolvedValue({ id: "n1", title: "t", body: "b", created_at: 0, updated_at: 1, deleted_at: null });
+    mocked.updateNote.mockResolvedValue({
+      id: "n1",
+      title: "t",
+      body: "b",
+      created_at: 0,
+      updated_at: 1,
+      deleted_at: null,
+    });
     await notesApi.update({ id: "n1", title: "t", body: "b" });
-    expect(mocked.updateNote).toHaveBeenCalledWith({ id: "n1", title: "t", body: "b" });
+    expect(mocked.updateNote).toHaveBeenCalledWith({
+      id: "n1",
+      title: "t",
+      body: "b",
+    });
   });
 });

@@ -8,6 +8,20 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [solid()],
   resolve: { alias: { "~": new URL("./src", import.meta.url).pathname } },
+  optimizeDeps: {
+    include: [
+      "@ark-ui/solid",
+      "@tanstack/solid-query",
+      "@solidjs/router",
+      "lucide-solid",
+      "class-variance-authority",
+      "clsx",
+      "tailwind-merge",
+      "marked",
+      "dompurify",
+    ],
+    exclude: [],
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

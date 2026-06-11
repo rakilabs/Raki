@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -11,9 +11,17 @@ const invokeMock = vi.mocked(invoke);
 
 describe("ipc commands", () => {
   it("createNote forwards the input under the `input` key", async () => {
-    invokeMock.mockResolvedValue({ id: "x", title: "T", body: "B", created_at: 0, updated_at: 0 });
+    invokeMock.mockResolvedValue({
+      id: "x",
+      title: "T",
+      body: "B",
+      created_at: 0,
+      updated_at: 0,
+    });
     await commands.createNote({ title: "T", body: "B" });
-    expect(invokeMock).toHaveBeenCalledWith("create_note", { input: { title: "T", body: "B" } });
+    expect(invokeMock).toHaveBeenCalledWith("create_note", {
+      input: { title: "T", body: "B" },
+    });
   });
 
   it("getNote forwards the id", async () => {

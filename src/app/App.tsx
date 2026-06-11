@@ -1,37 +1,58 @@
-import { createSignal, Show } from "solid-js";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
-import { NotesView } from "~/modules/notes/NotesView";
-import { AskBox } from "~/modules/qa/AskBox";
-import { SettingsPanel } from "~/modules/settings/SettingsPanel";
+import { ErrorBoundary } from "solid-js";
+import { ThemeProvider } from "~/app/providers/ThemeProvider";
+import { Router } from "~/app/Router";
+import { ToastProvider } from "~/shared/ui";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5,
+      retry: 1,
+    },
+  },
+});
 
 export function App() {
-  const [qaEnabled, setQaEnabled] = createSignal(localStorage.getItem("raki.qa.enabled") === "1");
-  const [settingsOpen, setSettingsOpen] = createSignal(false);
-  function toggleQa(on: boolean) {
-    setQaEnabled(on);
-    localStorage.setItem("raki.qa.enabled", on ? "1" : "0");
-  }
-
   return (
-    <QueryClientProvider client={queryClient}>
-      <main class="container">
-        <div class="app-header">
-          <label>
-            <input type="checkbox" checked={qaEnabled()} onChange={(e) => toggleQa(e.currentTarget.checked)} />
-            Enable experimental retrieval diagnostics
-          </label>
-          <button onClick={() => setSettingsOpen(true)}>Settings</button>
+    <ErrorBoundary
+      fallback={(err) => (
+        <div
+          style={{
+            "background-color": "#fee",
+            color: "#900",
+            padding: "20px",
+            "font-family": "monospace",
+          }}
+        >
+          <h1>App Error</h1>
+          <pre>{err instanceof Error ? err.message : String(err)}</pre>
+          <pre>{err instanceof Error ? err.stack : ""}</pre>
         </div>
-        <Show when={qaEnabled()}>
-          <AskBox />
-        </Show>
-        <NotesView />
-        <Show when={settingsOpen()}>
-          <SettingsPanel onClose={() => setSettingsOpen(false)} />
-        </Show>
-      </main>
-    </QueryClientProvider>
+      )}
+    >
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider defaultTheme="system">
+          <ToastProvider>
+            <ErrorBoundary
+              fallback={(err) => (
+                <div
+                  style={{
+                    "background-color": "#ffe",
+                    color: "#660",
+                    padding: "20px",
+                  }}
+                >
+                  <h2>Router Error</h2>
+                  <pre>{err instanceof Error ? err.message : String(err)}</pre>
+                </div>
+              )}
+            >
+              <Router />
+            </ErrorBoundary>
+          </ToastProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
