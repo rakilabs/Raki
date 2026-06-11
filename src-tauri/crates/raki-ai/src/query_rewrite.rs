@@ -234,28 +234,15 @@ mod tests {
     use std::sync::Arc;
     use crate::testing::FakeLlmProvider;
     use raki_domain::{
-        Completion, CompletionRequest, DomainError, EgressLog, EgressLogId, EgressRecord,
-        EgressSettings, LlmProvider, Locality,
+        DomainError, EgressLog, EgressLogId, EgressRecord, EgressSettings,
     };
     use raki_domain::testing::FixedClock;
     use std::collections::HashSet;
 
-    struct FakeGate(Arc<dyn LlmProvider>);
-
-    #[async_trait::async_trait]
-    impl LlmProvider for FakeGate {
-        fn locality(&self) -> Locality {
-            Locality::Cloud
-        }
-        async fn complete(&self, req: CompletionRequest) -> Result<Completion, DomainError> {
-            self.0.complete(req).await
-        }
-    }
-
     fn make_rewriter(response: &str) -> CloudQueryRewriter {
         let fake = Arc::new(FakeLlmProvider::ok(response));
         let gate = Arc::new(GatedLlmProvider::new(
-            Arc::new(FakeGate(fake)),
+            fake,
             Arc::new(AlwaysConsented),
             Arc::new(NoopLog),
             Arc::new(FixedClock(0)),
@@ -269,6 +256,17 @@ mod tests {
     impl EgressSettings for AlwaysConsented {
         async fn consented(&self) -> Result<HashSet<String>, DomainError> {
             Ok(HashSet::from(["test".to_string()]))
+        }
+        async fn grant(&self, _: &str) -> Result<(), DomainError> { Ok(()) }
+        async fn revoke(&self, _: &str) -> Result<(), DomainError> { Ok(()) }
+    }
+
+    #[derive(Default)]
+    struct NeverConsented;
+    #[async_trait::async_trait]
+    impl EgressSettings for NeverConsented {
+        async fn consented(&self) -> Result<HashSet<String>, DomainError> {
+            Ok(HashSet::new())
         }
         async fn grant(&self, _: &str) -> Result<(), DomainError> { Ok(()) }
         async fn revoke(&self, _: &str) -> Result<(), DomainError> { Ok(()) }
@@ -293,18 +291,41 @@ mod tests {
 
     #[tokio::test]
     async fn rewriter_caches_results() {
-        let rw = make_rewriter(r#"{"rewritten_query":"cached","needs_multi_hop":false,"sub_queries":[],"confidence":0.9}"#);
+        let fake = Arc::new(FakeLlmProvider::ok(r#"{"rewritten_query":"cached","needs_multi_hop":false,"sub_queries":[],"confidence":0.9}"#));
+        let gate = Arc::new(GatedLlmProvider::new(
+            fake.clone(),
+            Arc::new(AlwaysConsented),
+            Arc::new(NoopLog),
+            Arc::new(FixedClock(0)),
+        ));
+        let rw = CloudQueryRewriter::new(gate, "test".into(), "t".into());
         let u1 = rw.understand("same query").await.unwrap();
         let u2 = rw.understand("same query").await.unwrap();
         assert_eq!(u1.rewritten_query, u2.rewritten_query);
+        assert_eq!(fake.call_count(), 1);
     }
 
     #[tokio::test]
-    async fn rewriter_fallback_on_timeout() {
+    async fn rewriter_fallback_on_provider_error() {
         let fake = Arc::new(FakeLlmProvider::failing("network"));
         let gate = Arc::new(GatedLlmProvider::new(
-            Arc::new(FakeGate(fake)),
+            fake,
             Arc::new(AlwaysConsented),
+            Arc::new(NoopLog),
+            Arc::new(FixedClock(0)),
+        ));
+        let rw = CloudQueryRewriter::new(gate, "test".into(), "t".into());
+        let u = rw.understand("any").await.unwrap();
+        assert!(u.is_fallback);
+        assert_eq!(u.rewritten_query, "any");
+    }
+
+    #[tokio::test]
+    async fn rewriter_fallback_on_egress_denied() {
+        let fake = Arc::new(FakeLlmProvider::ok("ignored"));
+        let gate = Arc::new(GatedLlmProvider::new(
+            fake,
+            Arc::new(NeverConsented),
             Arc::new(NoopLog),
             Arc::new(FixedClock(0)),
         ));
