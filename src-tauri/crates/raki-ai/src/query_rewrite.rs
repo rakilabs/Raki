@@ -88,11 +88,29 @@ impl QueryRewriter for CloudQueryRewriter {
         let start = Instant::now();
         let result =
             tokio::time::timeout(REWRITE_TIMEOUT, self.gate.complete_gated(&decision, req)).await;
-        let understanding = match result {
-            Ok(Ok((completion, _))) => parse_understanding(&completion.text, query),
-            Ok(Err(EgressError::Denied(_))) => Ok(QueryUnderstanding::pass_through(query)),
-            Ok(Err(_)) | Err(_) => Ok(QueryUnderstanding::pass_through(query)),
-        }?;
+        let completion = match result {
+            Ok(Ok((completion, _))) => completion,
+            Ok(Err(EgressError::Denied(reason))) => {
+                return Err(DomainError::Provider(format!(
+                    "query rewrite blocked by egress policy: {reason}"
+                )));
+            }
+            Ok(Err(EgressError::Completion(e))) => {
+                return Err(DomainError::Provider(format!("query rewrite failed: {e}")));
+            }
+            Ok(Err(EgressError::Audit(e))) => {
+                return Err(DomainError::Provider(format!(
+                    "query rewrite audit logging failed: {e}"
+                )));
+            }
+            Err(_) => {
+                return Err(DomainError::Provider(format!(
+                    "query rewrite timed out after {}s",
+                    REWRITE_TIMEOUT.as_secs()
+                )));
+            }
+        };
+        let understanding = parse_understanding(&completion.text, query)?;
 
         tracing::debug!(
             raw_query = %query,
@@ -161,23 +179,16 @@ fn parse_understanding(raw: &str, original: &str) -> Result<QueryUnderstanding, 
         });
     }
 
-    // JSON parse failed: fall back to original query
-    if !text.trim().is_empty() {
-        return Ok(QueryUnderstanding {
-            rewritten_query: text.to_string(),
-            needs_multi_hop: false,
-            sub_queries: vec![],
-            confidence: 0.5,
-            is_fallback: true,
-        });
-    }
-
-    Ok(QueryUnderstanding::pass_through(original))
+    // JSON parse failed: surface the error to the caller instead of silently falling back.
+    Err(DomainError::Provider(format!(
+        "query rewrite response was not valid JSON: {text:.120}"
+    )))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use raki_domain::Completion;
 
     #[test]
     fn parse_valid_json() {
@@ -197,19 +208,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_plain_text_fallback() {
+    fn parse_plain_text_is_an_error() {
         let raw = "cash payment method";
-        let u = parse_understanding(raw, "how pay?").unwrap();
-        assert_eq!(u.rewritten_query, "cash payment method");
-        assert!(u.is_fallback);
-        assert_eq!(u.confidence, 0.5);
+        let err = parse_understanding(raw, "how pay?").unwrap_err();
+        assert!(err.to_string().contains("not valid JSON"));
     }
 
     #[test]
-    fn parse_empty_fallback() {
-        let u = parse_understanding("", "raw").unwrap();
-        assert_eq!(u.rewritten_query, "raw");
-        assert!(u.is_fallback);
+    fn parse_empty_is_an_error() {
+        let err = parse_understanding("", "raw").unwrap_err();
+        assert!(err.to_string().contains("not valid JSON"));
     }
 
     #[test]
@@ -332,7 +340,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rewriter_fallback_on_provider_error() {
+    async fn rewriter_propagates_provider_error() {
         let fake = Arc::new(FakeLlmProvider::failing("network"));
         let gate = Arc::new(GatedLlmProvider::new(
             fake,
@@ -341,13 +349,12 @@ mod tests {
             Arc::new(FixedClock(0)),
         ));
         let rw = CloudQueryRewriter::new(gate, "test".into(), "t".into());
-        let u = rw.understand("any").await.unwrap();
-        assert!(u.is_fallback);
-        assert_eq!(u.rewritten_query, "any");
+        let err = rw.understand("any").await.unwrap_err();
+        assert!(err.to_string().contains("query rewrite failed"));
     }
 
     #[tokio::test]
-    async fn rewriter_fallback_on_egress_denied() {
+    async fn rewriter_propagates_egress_denied() {
         let fake = Arc::new(FakeLlmProvider::ok("ignored"));
         let gate = Arc::new(GatedLlmProvider::new(
             fake,
@@ -356,9 +363,38 @@ mod tests {
             Arc::new(FixedClock(0)),
         ));
         let rw = CloudQueryRewriter::new(gate, "test".into(), "t".into());
-        let u = rw.understand("any").await.unwrap();
-        assert!(u.is_fallback);
-        assert_eq!(u.rewritten_query, "any");
+        let err = rw.understand("any").await.unwrap_err();
+        assert!(err.to_string().contains("blocked by egress policy"));
+    }
+
+    #[tokio::test]
+    async fn rewriter_propagates_timeout() {
+        // FakeLlmProvider::failing returns immediately, so we need a provider that sleeps.
+        struct SleepingProvider;
+        #[async_trait]
+        impl raki_domain::LlmProvider for SleepingProvider {
+            fn locality(&self) -> raki_domain::Locality {
+                raki_domain::Locality::Cloud
+            }
+            async fn complete(&self, _req: CompletionRequest) -> Result<Completion, DomainError> {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                Ok(Completion {
+                    text: "ignored".into(),
+                })
+            }
+        }
+        let gate = Arc::new(GatedLlmProvider::new(
+            Arc::new(SleepingProvider),
+            Arc::new(AlwaysConsented),
+            Arc::new(NoopLog),
+            Arc::new(FixedClock(0)),
+        ));
+        let rw = CloudQueryRewriter::new(gate, "test".into(), "t".into());
+        let start = std::time::Instant::now();
+        let err = rw.understand("any").await.unwrap_err();
+        let elapsed = start.elapsed();
+        assert!(err.to_string().contains("timed out"));
+        assert!(elapsed < std::time::Duration::from_secs(20));
     }
 
     #[tokio::test]

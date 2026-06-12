@@ -103,16 +103,20 @@ async fn resolve_query(
     query: &str,
 ) -> Result<String, DomainError> {
     match rewriter {
-        Some(r) => match r.understand(query).await {
-            Ok(u) if !u.is_fallback && !u.rewritten_query.trim().is_empty() => {
+        Some(r) => {
+            let u = r.understand(query).await?;
+            if !u.is_fallback && !u.rewritten_query.trim().is_empty() {
                 if u.needs_multi_hop && !u.sub_queries.is_empty() {
                     Ok(u.sub_queries[0].clone()) // stub: use first sub-query
                 } else {
                     Ok(u.rewritten_query)
                 }
+            } else {
+                // The rewriter explicitly returned a fallback (e.g. confidence 0, "no change").
+                // This is the model's intentional decision, not an error.
+                Ok(query.to_string())
             }
-            _ => Ok(query.to_string()),
-        },
+        }
         None => Ok(query.to_string()),
     }
 }
@@ -399,14 +403,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hybrid_search_falls_back_when_rewriter_errors() {
+    async fn hybrid_search_propagates_rewriter_error() {
         let keyword = FakeKeyword(vec![ID_A]);
         let vectors = FakeVectors(vec![]);
         let rewriter = ErrorRewriter;
-        let ids = hybrid_search(&keyword, &vectors, &FakeEmbed, Some(&rewriter), "vague", 3)
+        let err = hybrid_search(&keyword, &vectors, &FakeEmbed, Some(&rewriter), "vague", 3)
             .await
-            .unwrap();
-        assert_eq!(ids, vec![nid(ID_A)]);
+            .unwrap_err();
+        assert!(err.to_string().contains("test error"));
     }
 
     #[tokio::test]
