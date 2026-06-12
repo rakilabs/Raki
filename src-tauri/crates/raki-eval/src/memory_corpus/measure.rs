@@ -8,6 +8,7 @@ use raki_domain::{
 };
 use raki_memory::DefaultSignalBooster;
 use raki_retrieval::{hybrid_candidates_scored, hybrid_search_with_signals, ScoredNote};
+use serde::{Deserialize, Serialize};
 
 use crate::memory_corpus::seed::seed_queries;
 
@@ -135,7 +136,7 @@ pub fn build_signal_map(now_ms: i64) -> HashMap<NoteId, NoteSignals> {
 }
 
 /// One row of an ablation report.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AblationResult {
     pub name: &'static str,
     pub success_at_3_count: usize,

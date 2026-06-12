@@ -94,21 +94,29 @@ Errors surface to the user instead of silent fallback. Eval integration (`RuleBa
 live-model smoke test added. Spec/plan:
 `docs/superpowers/specs/2026-06-10-r3-query-understanding-design.md`.
 
-### ▶ R4 — Memory lifecycle
+### ✅ R4.1 / R4-corpus / R4.2-harness — Memory lifecycle signals
 **Goal:** grow `raki-memory` beyond context assembly — recency / salience / pinning signals feeding
 ranking ("a second brain knows time, links, and tags").
 **Exit:** measured contribution to ranking; not a guess.
-**Status:** ▶ Active, split into three honest slices:
+**Status:** ✅ Harness complete. R4.1 signal ports + `DefaultSignalBooster`, migration V8,
+`SqliteSignalSource`/`SqliteSignalStore`, `record_note_view` command, and seed corpus (26 notes,
+26 queries) are implemented under `src-tauri/crates/raki-*` and `raki-eval`.
 - **R4.1** — Signal model & multiplicative mixer (`raki-memory`), `SignalSource` port +
   `SqliteSignalSource` storage, migration V8. Build + unit-test; **not** production default yet.
-- **R4-corpus** — Hand-authored synthetic real-notes seed corpus + procedural generator under
-  `raki-eval`, so signals have a failing corpus to rescue.
-- **R4.2** — Measure mixer against the corpus; attach to production `hybrid_search` only if lift is
-  positive and meaningful, else tune/delete per ADR-0007.
+- **R4-corpus** — Hand-authored synthetic real-notes seed corpus under
+  `raki-eval/src/memory_corpus/seed.rs`, plus `DATA_PROVENANCE.md`.
+- **R4.2** — Baseline + measurement + ablation harness implemented; baseline committed to
+  `docs/eval/r4-memory-baseline.json`. Initial run with the deterministic fake embedder yields
+  **no measurable Success@3 lift** (3/26 queries succeed at k=10 for baseline, all-signals, and each
+  single-signal ablation), so the mixer **remains off the production path**.
+**Decision:** Keep the signal infrastructure (ports, storage, booster, command) but do **not** wire
+`hybrid_search_with_signals` into production `search_notes`. The binding attach/tune/delete verdict is
+pending a real embedding-model evaluation on this corpus (ADR-0009).
 **Note:** Link-density and tag-affinity signals are deferred until Phase 2 link graph / tags exist.
 Spec: `docs/superpowers/specs/2026-06-10-r4-memory-lifecycle-signals-design.md`.
+Plan: `docs/superpowers/plans/2026-06-12-r4-memory-lifecycle-signals.md`.
 
-### 🔒 R4 — Memory lifecycle — blocked on R0
+### 🔒 R4 — Memory lifecycle — production attach blocked on real-model evaluation
 **Goal:** grow `raki-memory` beyond context assembly — recency / salience / pinning signals feeding
 ranking ("a second brain knows time, links, tags"). Today the crate is context-assembly only.
 **Exit:** measured contribution to ranking; not a guess.
