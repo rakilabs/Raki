@@ -27,6 +27,10 @@ path = "src/bin/bench.rs"
 name = "bench-smoke"
 path = "src/bin/bench-smoke.rs"
 
+[[bin]]
+name = "record_memory_baseline"
+path = "src/bin/record_memory_baseline.rs"
+
 [dependencies]
 raki-domain = { workspace = true }
 raki-storage = { workspace = true }
