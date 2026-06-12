@@ -74,10 +74,7 @@ pub struct SignalBreakdown {
 #[async_trait]
 pub trait SignalSource: Send + Sync {
     /// Load signals for the given note ids. Missing ids yield default signals.
-    async fn get(
-        &self,
-        note_ids: &[NoteId],
-    ) -> Result<HashMap<NoteId, NoteSignals>, DomainError>;
+    async fn get(&self, note_ids: &[NoteId]) -> Result<HashMap<NoteId, NoteSignals>, DomainError>;
 }
 
 #[async_trait]
@@ -283,13 +280,23 @@ mod tests {
 
     #[test]
     fn mixer_config_rejects_invalid_values() {
-        use super::MixerConfig;
         assert!(MixerConfig::new(0.0, 0.1, 0.1, 1.5).is_err());
         assert!(MixerConfig::new(-1.0, 0.1, 0.1, 1.5).is_err());
         assert!(MixerConfig::new(7.0, -0.1, 0.1, 1.5).is_err());
         assert!(MixerConfig::new(7.0, 0.1, -0.1, 1.5).is_err());
         assert!(MixerConfig::new(7.0, 0.1, 0.1, 0.5).is_err());
         assert!(MixerConfig::new(7.0, 0.1, 0.1, f64::NAN).is_err());
+
+        // Valid boundary cases
+        assert!(MixerConfig::new(7.0, 0.25, 0.15, 2.0).is_ok());
+        assert!(MixerConfig::new(7.0, 0.0, 0.0, 1.0).is_ok());
+
+        // Infinite values are rejected
+        assert!(MixerConfig::new(f64::INFINITY, 0.1, 0.1, 1.5).is_err());
+        assert!(MixerConfig::new(7.0, f64::INFINITY, 0.1, 1.5).is_err());
+        assert!(MixerConfig::new(7.0, 0.1, f64::INFINITY, 1.5).is_err());
+        assert!(MixerConfig::new(7.0, 0.1, 0.1, f64::INFINITY).is_err());
+        assert!(MixerConfig::new(7.0, 0.1, 0.1, f64::NEG_INFINITY).is_err());
     }
 }
 
