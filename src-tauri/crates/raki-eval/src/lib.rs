@@ -9,6 +9,7 @@ pub mod chunk;
 pub mod chunk_baseline;
 pub mod local_corpus;
 pub mod markdown;
+pub mod memory_corpus;
 pub mod realmetrics;
 pub use chunk_baseline::render_chunking_baseline;
 use serde::{Deserialize, Serialize};
