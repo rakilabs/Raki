@@ -114,6 +114,13 @@ pub fn run() {
 
             let provider = "kimi".to_string();
             let model = std::env::var("RAKI_LLM_MODEL").unwrap_or_else(|_| "kimi-k2-5".to_string());
+            let rewrite_model = std::env::var("RAKI_QUERY_REWRITE_MODEL").unwrap_or_else(|_| {
+                // Query rewriting is latency-sensitive. Default to the QA model, but strongly
+                // recommend a cheaper/faster model (e.g. kimi-k2-5-instruct or equivalent)
+                // via RAKI_QUERY_REWRITE_MODEL when rewrite is enabled.
+                model.clone()
+            });
+
             let inner: Arc<dyn LlmProvider> = match MessagesProvider::from_env() {
                 Ok(p) => Arc::new(p),
                 Err(e) => {
@@ -121,6 +128,8 @@ pub fn run() {
                     Arc::new(UnconfiguredProvider)
                 }
             };
+            // Hold a clone for the rewrite-provider fallback path before moving `inner` into `gate`.
+            let inner_for_rewrite_fallback = inner.clone();
             let clock: Arc<dyn Clock> = Arc::new(SystemClock);
             let gate = Arc::new(GatedLlmProvider::new(
                 inner,
@@ -134,10 +143,29 @@ pub fn run() {
                 .unwrap_or(false);
 
             let rewriter: Option<Arc<dyn QueryRewriter>> = if query_rewrite_enabled {
+                let rewrite_inner: Arc<dyn LlmProvider> =
+                    match MessagesProvider::from_env_with_model(Some(rewrite_model.clone())) {
+                        Ok(p) => Arc::new(p),
+                        Err(e) => {
+                            eprintln!(
+                                "rewrite model unavailable ({e}); falling back to QA model for rewrite"
+                            );
+                            // Reuse the QA provider. CloudQueryRewriter's decision will still
+                            // report rewrite_model, which is a minor audit mismatch, but the
+                            // feature stays up.
+                            inner_for_rewrite_fallback.clone()
+                        }
+                    };
+                let rewrite_gate = Arc::new(GatedLlmProvider::new(
+                    rewrite_inner,
+                    settings.clone(),
+                    egress_log.clone(),
+                    clock.clone(),
+                ));
                 Some(Arc::new(CloudQueryRewriter::new(
-                    gate.clone(),
+                    rewrite_gate,
                     provider.clone(),
-                    model.clone(),
+                    rewrite_model,
                 )))
             } else {
                 None

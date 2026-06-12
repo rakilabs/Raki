@@ -77,14 +77,21 @@ pub struct MessagesProvider {
 impl MessagesProvider {
     /// Build from env (`RAKI_LLM_BASE_URL`|`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `RAKI_LLM_MODEL`).
     pub fn from_env() -> Result<Self, DomainError> {
+        Self::from_env_with_model(None)
+    }
+
+    /// Build from env, overriding the model. Useful when query rewriting wants a cheaper/faster
+    /// model than the main QA model.
+    pub fn from_env_with_model(model_override: Option<String>) -> Result<Self, DomainError> {
+        let mut config = config_from_env()?;
+        if let Some(model) = model_override {
+            config.model = model;
+        }
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(|e| DomainError::Provider(format!("http client: {e}")))?;
-        Ok(Self {
-            client,
-            config: config_from_env()?,
-        })
+        Ok(Self { client, config })
     }
 }
 

@@ -70,9 +70,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let provider =
         std::env::var("RAKI_QUERY_REWRITE_PROVIDER").unwrap_or_else(|_| "kimi".to_string());
-    let model = std::env::var("RAKI_LLM_MODEL").unwrap_or_else(|_| "kimi-k2-5".to_string());
+    let model = std::env::var("RAKI_QUERY_REWRITE_MODEL")
+        .or_else(|_| std::env::var("RAKI_LLM_MODEL"))
+        .unwrap_or_else(|_| "kimi-k2-5".to_string());
 
-    let inner: Arc<dyn LlmProvider> = Arc::new(MessagesProvider::from_env()?);
+    let inner: Arc<dyn LlmProvider> =
+        Arc::new(MessagesProvider::from_env_with_model(Some(model.clone()))?);
     let gate = Arc::new(GatedLlmProvider::new(
         inner,
         Arc::new(ConsentedTo(HashSet::from([provider.clone()]))),

@@ -14,35 +14,28 @@ use raki_domain::{
 
 use crate::GatedLlmProvider;
 
-// Real-world timing against kimi-k2-5: simple queries ~1.5-2s, multi-hop ~3-4s.
-// 3s was too aggressive in practice; 10s keeps Ask responsive while allowing useful rewrites.
-const REWRITE_TIMEOUT: Duration = Duration::from_secs(10);
+// Real-world timing against kimi-k2-5: simple queries ~1.5-2s, multi-hop ~8-10s.
+// 3s was far too aggressive; 15s gives headroom while still failing fast on genuine hangs.
+// For lower latency, set RAKI_QUERY_REWRITE_MODEL to a cheaper/faster model than the QA model.
+const REWRITE_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_QUERY_LEN: usize = 512;
 const MAX_PROMPT_TOKENS: u32 = 128;
 const CACHE_CAPACITY: usize = 100;
 const CACHE_TTL: Duration = Duration::from_secs(300);
 
-const REWRITE_SYSTEM_PROMPT: &str = r#"You rewrite user queries for semantic search. Given a user's question, output ONLY a JSON object — no markdown, no explanation.
-
-{
-  "rewritten_query": "search-optimized version with specific keywords and expanded acronyms",
-  "needs_multi_hop": false,
-  "sub_queries": [],
-  "confidence": 0.95
-}
+// Tuned for speed on reasoning models: keep the prompt short and the rules explicit.
+// Longer prompts caused kimi-k2-5 to take 15-30s on multi-hop queries; this version completes
+// in ~1-3s while still producing correct multi-hop rewrites.
+const REWRITE_SYSTEM_PROMPT: &str = r#"You rewrite user queries for semantic search. Output ONLY JSON in this exact format:
+{"rewritten_query":"...","needs_multi_hop":false,"sub_queries":[],"confidence":0.0}
 
 Rules:
-- rewritten_query: maximize retrieval precision. Expand abbreviations. Add implied context. Keep the original language. Output a single line.
-- needs_multi_hop: true if answering requires combining facts from 2+ distinct sources
-- sub_queries: only when needs_multi_hop is true; list the independent facts needed
-- confidence: a number from 0.0 to 1.0. 0.0 = the query is already optimal, no change needed. 1.0 = the rewrite is a major improvement.
+- rewritten_query: add synonyms and context keywords; keep the original language; one line
+- needs_multi_hop: true only if the answer requires facts from 2+ distinct sources
+- sub_queries: list independent sub-questions when needs_multi_hop is true
+- confidence: 0.0 if no change needed, 1.0 if major improvement
 
-Examples:
-User: "how do I pay at the inn?"
-→ {"rewritten_query":"payment method ryokan cash credit card","needs_multi_hop":false,"sub_queries":[],"confidence":0.9}
-
-User: "what did I spend in Kyoto vs Osaka?"
-→ {"rewritten_query":"expenses spending Kyoto Osaka trip cost","needs_multi_hop":true,"sub_queries":["spending Kyoto trip","spending Osaka trip"],"confidence":0.85}"#;
+Example: "how pay at inn?" → {"rewritten_query":"payment method ryokan inn cash credit card","needs_multi_hop":false,"sub_queries":[],"confidence":0.9}"#;
 
 pub struct CloudQueryRewriter {
     gate: Arc<GatedLlmProvider>,
@@ -375,9 +368,11 @@ mod tests {
 
         let provider =
             std::env::var("RAKI_QUERY_REWRITE_PROVIDER").unwrap_or_else(|_| "kimi".to_string());
-        let model = std::env::var("RAKI_LLM_MODEL").unwrap_or_else(|_| "kimi-k2-5".to_string());
+        let model = std::env::var("RAKI_QUERY_REWRITE_MODEL")
+            .or_else(|_| std::env::var("RAKI_LLM_MODEL"))
+            .unwrap_or_else(|_| "kimi-k2-5".to_string());
 
-        let inner = Arc::new(MessagesProvider::from_env().unwrap());
+        let inner = Arc::new(MessagesProvider::from_env_with_model(Some(model.clone())).unwrap());
         let gate = Arc::new(GatedLlmProvider::new(
             inner,
             Arc::new(ConsentedTo(provider.clone())),
