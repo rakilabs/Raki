@@ -71,6 +71,21 @@ const MIGRATIONS: &[&str] = &[
         embedding float[384]
     );
     UPDATE notes SET embedded_hash = NULL;",
+    // V8: memory-lifecycle signals. pinned flag on notes; aggregated access stats on note_signals.
+    "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE note_signals (
+        id TEXT PRIMARY KEY,
+        note_id TEXT NOT NULL UNIQUE,
+        view_count INTEGER NOT NULL DEFAULT 0,
+        last_accessed_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        deleted_at INTEGER,
+        version INTEGER NOT NULL,
+        FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+    ) STRICT;
+    CREATE INDEX idx_note_signals_note_id ON note_signals(note_id);
+    CREATE INDEX idx_note_signals_last_accessed ON note_signals(last_accessed_at) WHERE deleted_at IS NULL;",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
@@ -274,5 +289,43 @@ mod tests {
             embedded_hash, None,
             "V7 clears embedded_hash so the corpus is re-chunked and re-embedded"
         );
+    }
+
+    #[test]
+    fn v8_creates_pinned_and_note_signals() {
+        use crate::db::register_sqlite_vec;
+        use rusqlite::Connection;
+
+        register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+
+        for sql in &MIGRATIONS[0..7] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 7i64).unwrap();
+
+        conn.execute(
+            "INSERT INTO notes (id, title, body, created_at, updated_at, deleted_at, version)
+             VALUES ('n1', 'T', 'b', 1, 1, NULL, 1)",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap(); // applies V8
+
+        let pinned: i64 = conn
+            .query_row("SELECT pinned FROM notes WHERE id = 'n1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(pinned, 0);
+
+        let cols: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('note_signals')
+                 WHERE name IN ('id','note_id','view_count','last_accessed_at','created_at','updated_at','deleted_at','version')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cols, 8);
     }
 }
