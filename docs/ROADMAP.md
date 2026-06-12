@@ -85,11 +85,28 @@ tripwire.
 > and R2's binding verdict is still the enabler for measurement — P1 (Track B) remains the path to
 > trustworthy real-note dogfooding.
 
-### ⬜ R3 — Generate-stage query understanding
+### ✅ R3 — Generate-stage query understanding
 **Goal:** LLM query rewriting / HyDE / multi-hop feeding the recall stage (ADR-0006 stage 3).
 **Exit:** measured lift over the R2 baseline.
-**Note:** Unblocked now that R2 chunking is in production. The HyDE/generated-query stage benefits
-from chunk-level recall because rewritten queries retrieve against the chunk index, not whole notes.
+**Status:** ✅ Done. `CloudQueryRewriter` implemented in `raki-ai`, wired through `raki-retrieval`/
+`raki-generate`/`raki-app` for Ask only, with caching, timeout, and Kimi thinking-disabled path.
+Errors surface to the user instead of silent fallback. Eval integration (`RuleBasedRewriter`) and
+live-model smoke test added. Spec/plan:
+`docs/superpowers/specs/2026-06-10-r3-query-understanding-design.md`.
+
+### ▶ R4 — Memory lifecycle
+**Goal:** grow `raki-memory` beyond context assembly — recency / salience / pinning signals feeding
+ranking ("a second brain knows time, links, and tags").
+**Exit:** measured contribution to ranking; not a guess.
+**Status:** ▶ Active, split into three honest slices:
+- **R4.1** — Signal model & multiplicative mixer (`raki-memory`), `SignalSource` port +
+  `SqliteSignalSource` storage, migration V8. Build + unit-test; **not** production default yet.
+- **R4-corpus** — Hand-authored synthetic real-notes seed corpus + procedural generator under
+  `raki-eval`, so signals have a failing corpus to rescue.
+- **R4.2** — Measure mixer against the corpus; attach to production `hybrid_search` only if lift is
+  positive and meaningful, else tune/delete per ADR-0007.
+**Note:** Link-density and tag-affinity signals are deferred until Phase 2 link graph / tags exist.
+Spec: `docs/superpowers/specs/2026-06-10-r4-memory-lifecycle-signals-design.md`.
 
 ### 🔒 R4 — Memory lifecycle — blocked on R0
 **Goal:** grow `raki-memory` beyond context assembly — recency / salience / pinning signals feeding
