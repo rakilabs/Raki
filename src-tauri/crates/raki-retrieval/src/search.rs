@@ -92,7 +92,6 @@ pub async fn hybrid_candidates_scored(
     let ids = hybrid_candidates(keyword, vectors, embedder, rewriter, query, top_k).await?;
     let scored: Vec<ScoredNote> = ids
         .into_iter()
-        .take(top_k)
         .enumerate()
         .map(|(rank, note_id)| ScoredNote {
             note_id,
@@ -132,6 +131,7 @@ pub async fn hybrid_search_with_signals(
         .collect();
 
     boosted.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    boosted.truncate(k);
     Ok(boosted.into_iter().map(|(id, _)| id).collect())
 }
 
@@ -187,7 +187,11 @@ async fn resolve_query(
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use raki_domain::{DomainError, KeywordHit, KeywordIndex, QueryUnderstanding};
+    use raki_domain::{
+        DomainError, KeywordHit, KeywordIndex, NoteSignals, QueryUnderstanding, SignalBooster,
+        SignalBreakdown, SignalSource,
+    };
+    use std::collections::HashMap;
 
     // Stable UUIDs used in place of single-letter ids so NoteId::parse succeeds.
     const ID_A: &str = "00000000-0000-0000-0000-00000000000a";
@@ -496,6 +500,147 @@ mod tests {
             .unwrap();
         assert_eq!(scored.len(), 3);
         assert_eq!(scored[0].note_id, nid(ID_B));
-        assert!(scored[0].retrieval_score > scored[1].retrieval_score);
+        assert_eq!(scored[0].retrieval_score, 1.0);
+        assert_eq!(scored[1].note_id, nid(ID_C));
+        assert_eq!(scored[1].retrieval_score, 0.5);
+        assert_eq!(scored[2].note_id, nid(ID_A));
+        assert_eq!(scored[2].retrieval_score, 1.0 / 3.0);
+    }
+
+    struct FakeSignalSource {
+        signals: HashMap<NoteId, NoteSignals>,
+    }
+
+    #[async_trait]
+    impl SignalSource for FakeSignalSource {
+        async fn get(
+            &self,
+            note_ids: &[NoteId],
+        ) -> Result<HashMap<NoteId, NoteSignals>, DomainError> {
+            let mut out = HashMap::new();
+            for id in note_ids {
+                out.insert(*id, self.signals.get(id).cloned().unwrap_or_default());
+            }
+            Ok(out)
+        }
+    }
+
+    struct ConstantBooster(f64);
+
+    impl SignalBooster for ConstantBooster {
+        fn boost(
+            &self,
+            _retrieval_score: f64,
+            _signals: &NoteSignals,
+            _now_ms: i64,
+        ) -> (f64, SignalBreakdown) {
+            (
+                self.0,
+                SignalBreakdown {
+                    recency: 0.0,
+                    pin: 0.0,
+                    salience: 0.0,
+                    raw_boost: 1.0,
+                    capped_boost: 1.0,
+                },
+            )
+        }
+    }
+
+    struct AdditivePinBooster {
+        pin_boost: f64,
+    }
+
+    impl SignalBooster for AdditivePinBooster {
+        fn boost(
+            &self,
+            retrieval_score: f64,
+            signals: &NoteSignals,
+            _now_ms: i64,
+        ) -> (f64, SignalBreakdown) {
+            let pin = if signals.pinned { self.pin_boost } else { 0.0 };
+            (
+                retrieval_score + pin,
+                SignalBreakdown {
+                    recency: 0.0,
+                    pin,
+                    salience: 0.0,
+                    raw_boost: 1.0 + pin,
+                    capped_boost: 1.0 + pin,
+                },
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_with_signals_pinned_note_can_overtake() {
+        // Retrieval order is [b, c, a]; pinning a gives it enough boost to jump to first.
+        let keyword = FakeKeyword(vec![ID_A, ID_B]);
+        let vectors = FakeVectors(vec![ID_B.to_string(), ID_C.to_string()]);
+        let mut signals = HashMap::new();
+        signals.insert(
+            nid(ID_A),
+            NoteSignals {
+                pinned: true,
+                ..Default::default()
+            },
+        );
+        let source = FakeSignalSource { signals };
+        let booster = AdditivePinBooster { pin_boost: 10.0 };
+        let ids = hybrid_search_with_signals(
+            &keyword, &vectors, &FakeEmbed, None, &source, &booster, "q", 3, 0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ids, vec![nid(ID_A), nid(ID_B), nid(ID_C)]);
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_with_signals_empty_signals_preserve_retrieval_order() {
+        let keyword = FakeKeyword(vec![ID_A, ID_B]);
+        let vectors = FakeVectors(vec![ID_B.to_string(), ID_C.to_string()]);
+        let source = FakeSignalSource {
+            signals: HashMap::new(),
+        };
+        let booster = AdditivePinBooster { pin_boost: 0.0 };
+        let ids = hybrid_search_with_signals(
+            &keyword, &vectors, &FakeEmbed, None, &source, &booster, "q", 3, 0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ids, vec![nid(ID_B), nid(ID_C), nid(ID_A)]);
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_with_signals_equal_scores_tie_break_by_note_id() {
+        let keyword = FakeKeyword(vec![ID_A, ID_B]);
+        let vectors = FakeVectors(vec![ID_B.to_string(), ID_C.to_string()]);
+        let source = FakeSignalSource {
+            signals: HashMap::new(),
+        };
+        let booster = ConstantBooster(1.0);
+        let ids = hybrid_search_with_signals(
+            &keyword, &vectors, &FakeEmbed, None, &source, &booster, "q", 3, 0,
+        )
+        .await
+        .unwrap();
+        // All boosted scores equal; tie-break by NoteId ascending.
+        assert_eq!(ids, vec![nid(ID_A), nid(ID_B), nid(ID_C)]);
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_with_signals_empty_candidates_returns_empty() {
+        let keyword = FakeKeyword(vec![]);
+        let vectors = FakeVectors(vec![]);
+        let source = FakeSignalSource {
+            signals: HashMap::new(),
+        };
+        let booster = ConstantBooster(1.0);
+        let ids = hybrid_search_with_signals(
+            &keyword, &vectors, &FakeEmbed, None, &source, &booster, "q", 3, 0,
+        )
+        .await
+        .unwrap();
+        assert!(ids.is_empty());
     }
 }
