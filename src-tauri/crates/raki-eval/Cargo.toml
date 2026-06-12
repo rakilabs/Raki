@@ -36,6 +36,7 @@ raki-domain = { workspace = true }
 raki-storage = { workspace = true }
 raki-ai = { workspace = true }
 raki-retrieval = { workspace = true }
+raki-memory = { workspace = true }
 pulldown-cmark = { version = "0.12", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
