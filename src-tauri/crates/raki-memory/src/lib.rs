@@ -3,6 +3,8 @@
 mod chunk;
 mod context;
 pub mod indexing;
+mod signals;
 
 pub use chunk::chunk_note;
 pub use context::{assemble_context, AssembledContext, Candidate, ContextItem};
+pub use signals::DefaultSignalBooster;
