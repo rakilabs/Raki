@@ -103,3 +103,9 @@ pub struct EgressLogEntryDto {
     #[ts(type = "number")]
     pub created_at: i64,
 }
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/shared/ipc/bindings/")]
+pub struct RecordNoteViewInput {
+    pub note_id: String,
+}

@@ -33,6 +33,7 @@ use crate::commands::qa::answer_question;
 use crate::commands::settings::{
     get_egress_settings, grant_provider_consent, list_egress_log, revoke_provider_consent,
 };
+use crate::commands::signals::record_note_view;
 use crate::indexing::IndexingService;
 use crate::state::AppState;
 
@@ -220,6 +221,7 @@ pub fn run() {
             grant_provider_consent,
             revoke_provider_consent,
             list_egress_log,
+            record_note_view,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
