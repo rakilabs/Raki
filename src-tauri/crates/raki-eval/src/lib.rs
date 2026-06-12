@@ -302,7 +302,7 @@ const RERANK_POOL: usize = 20;
 /// file. The single source of truth for index construction — both `run_eval_over` (synthetic
 /// fixtures) and `run_benchmark` (BEIR) build on it (AGENTS.md §5/§9). Callers do their own
 /// corpus-loading loop (chunked vs whole-doc differ).
-pub(crate) fn build_in_memory_index() -> Result<
+pub fn build_in_memory_index() -> Result<
     (
         Database,
         SqliteNoteRepository,
