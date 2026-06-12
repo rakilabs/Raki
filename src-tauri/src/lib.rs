@@ -17,11 +17,12 @@ use raki_ai::{
 };
 use raki_domain::{
     Clock, Completion, CompletionRequest, DomainError, EmbeddingProvider, IndexingStore,
-    LlmProvider, Locality, QueryRewriter, Reranker, VectorIndex,
+    LlmProvider, Locality, MixerConfig, QueryRewriter, Reranker, SignalBooster, VectorIndex,
 };
+use raki_memory::signals::DefaultSignalBooster;
 use raki_storage::{
     Database, SqliteEgressLog, SqliteEgressSettings, SqliteIndexingStore, SqliteKeywordIndex,
-    SqliteNoteRepository, SqliteVectorIndex,
+    SqliteNoteRepository, SqliteSignalSource, SqliteSignalStore, SqliteVectorIndex,
 };
 
 use crate::commands::notes::{
@@ -112,6 +113,12 @@ pub fn run() {
             let egress_log: Arc<dyn raki_domain::EgressLog> =
                 Arc::new(SqliteEgressLog::new(db.clone()));
 
+            let signals = Arc::new(SqliteSignalSource::new(db.clone()));
+            let signal_store = Arc::new(SqliteSignalStore::new(db.clone()));
+            let signal_booster: Arc<dyn SignalBooster> = Arc::new(DefaultSignalBooster::new(
+                MixerConfig::new(7.0, 0.25, 0.15, 2.0)?,
+            ));
+
             let provider = "kimi".to_string();
             let model = std::env::var("RAKI_LLM_MODEL").unwrap_or_else(|_| "kimi-k2-5".to_string());
             let rewrite_model = std::env::var("RAKI_QUERY_REWRITE_MODEL").unwrap_or_else(|_| {
@@ -193,6 +200,9 @@ pub fn run() {
                 k: 10,
                 budget_tokens: 2000,
                 rewriter,
+                signal_source: signals.clone(),
+                signal_store: signal_store.clone(),
+                signal_booster: signal_booster.clone(),
             });
             Ok(())
         })

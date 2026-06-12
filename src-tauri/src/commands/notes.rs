@@ -218,6 +218,7 @@ pub async fn update_note(
             message: "note not found".into(),
         });
     }
+    state.signal_store.touch(&nid, state.clock.now_ms()).await?;
     state.index.trigger();
     Ok(NoteDto::from(edited))
 }
