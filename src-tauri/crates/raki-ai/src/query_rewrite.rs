@@ -14,7 +14,9 @@ use raki_domain::{
 
 use crate::GatedLlmProvider;
 
-const REWRITE_TIMEOUT: Duration = Duration::from_secs(3);
+// Real-world timing against kimi-k2-5: simple queries ~1.5-2s, multi-hop ~3-4s.
+// 3s was too aggressive in practice; 10s keeps Ask responsive while allowing useful rewrites.
+const REWRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_QUERY_LEN: usize = 512;
 const MAX_PROMPT_TOKENS: u32 = 128;
 const CACHE_CAPACITY: usize = 100;
