@@ -71,7 +71,13 @@ pub(crate) fn register_sqlite_vec() {
 }
 
 pub(crate) fn storage_err(e: rusqlite::Error) -> DomainError {
-    DomainError::Storage(e.to_string())
+    match e {
+        rusqlite::Error::ToSqlConversionFailure(err) => match err.downcast::<DomainError>() {
+            Ok(d) => *d,
+            Err(err) => DomainError::Storage(err.to_string()),
+        },
+        other => DomainError::Storage(other.to_string()),
+    }
 }
 
 #[cfg(test)]

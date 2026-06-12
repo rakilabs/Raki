@@ -26,33 +26,41 @@ impl SignalSource for SqliteSignalSource {
             .call(move |c| {
                 let mut map = HashMap::new();
                 for id in &ids {
-                    let pinned: i64 = c
-                        .query_row(
-                            "SELECT pinned FROM notes WHERE id = ?1 AND deleted_at IS NULL",
-                            params![id],
-                            |r| r.get(0),
-                        )
-                        .unwrap_or(0);
-
-                    let row = c.query_row(
-                        "SELECT view_count, last_accessed_at
-                         FROM note_signals
-                         WHERE note_id = ?1 AND deleted_at IS NULL",
-                        params![id],
-                        |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, Option<i64>>(1)?)),
-                    );
-
-                    let (view_count, last_accessed_at_ms) = row.unwrap_or((0, None));
                     let note_id = NoteId::parse(id)
                         .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-                    map.insert(
-                        note_id,
-                        NoteSignals {
-                            pinned: pinned != 0,
-                            view_count,
-                            last_accessed_at_ms,
+
+                    let row = c.query_row(
+                        "SELECT n.pinned, s.view_count, s.last_accessed_at
+                         FROM notes n
+                         LEFT JOIN note_signals s
+                            ON s.note_id = n.id AND s.deleted_at IS NULL
+                         WHERE n.id = ?1 AND n.deleted_at IS NULL",
+                        params![id],
+                        |r| {
+                            Ok((
+                                r.get::<_, i64>(0)?,
+                                r.get::<_, Option<i64>>(1)?,
+                                r.get::<_, Option<i64>>(2)?,
+                            ))
                         },
                     );
+
+                    match row {
+                        Ok((pinned, view_count, last_accessed_at_ms)) => {
+                            map.insert(
+                                note_id,
+                                NoteSignals {
+                                    pinned: pinned != 0,
+                                    view_count: view_count.unwrap_or(0) as u64,
+                                    last_accessed_at_ms,
+                                },
+                            );
+                        }
+                        Err(rusqlite::Error::QueryReturnedNoRows) => {
+                            map.insert(note_id, NoteSignals::default());
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
                 Ok(map)
             })
@@ -139,7 +147,7 @@ mod tests {
     use super::*;
     use crate::db::Database;
     use crate::notes::SqliteNoteRepository;
-    use raki_domain::{Note, NoteId, NoteRepository, SignalSource, SignalStore};
+    use raki_domain::{DomainError, Note, NoteId, NoteRepository, SignalSource, SignalStore};
 
     fn sample(id: NoteId, title: &str) -> Note {
         Note {
@@ -182,5 +190,83 @@ mod tests {
 
         let err = store.record_view(&id, 5000).await.unwrap_err();
         assert!(err.to_string().contains("not found") || err.to_string().contains("deleted"));
+    }
+
+    #[tokio::test]
+    async fn touch_updates_last_accessed_without_incrementing_view_count() {
+        let db = Database::open_in_memory().unwrap();
+        let notes = SqliteNoteRepository::new(db.clone());
+        let store = SqliteSignalStore::new(db.clone());
+        let source = SqliteSignalSource::new(db.clone());
+        let id = NoteId::new();
+        notes.upsert(&sample(id, "T")).await.unwrap();
+
+        store.record_view(&id, 5000).await.unwrap();
+        store.touch(&id, 6000).await.unwrap();
+
+        let s = source.get(&[id]).await.unwrap().remove(&id).unwrap();
+        assert_eq!(s.view_count, 1);
+        assert_eq!(s.last_accessed_at_ms, Some(6000));
+    }
+
+    #[tokio::test]
+    async fn touch_rejects_deleted_note() {
+        let db = Database::open_in_memory().unwrap();
+        let notes = SqliteNoteRepository::new(db.clone());
+        let store = SqliteSignalStore::new(db.clone());
+        let id = NoteId::new();
+        notes.upsert(&sample(id, "T")).await.unwrap();
+        notes.soft_delete(&id, 3000).await.unwrap();
+
+        let err = store.touch(&id, 5000).await.unwrap_err();
+        assert!(matches!(err, DomainError::NotFound));
+    }
+
+    #[tokio::test]
+    async fn get_returns_defaults_for_missing_id() {
+        let db = Database::open_in_memory().unwrap();
+        let source = SqliteSignalSource::new(db);
+        let id = NoteId::new();
+
+        let s = source.get(&[id]).await.unwrap().remove(&id).unwrap();
+        assert_eq!(s, NoteSignals::default());
+    }
+
+    #[tokio::test]
+    async fn get_returns_pinned_true_for_pinned_note() {
+        let db = Database::open_in_memory().unwrap();
+        let notes = SqliteNoteRepository::new(db.clone());
+        let source = SqliteSignalSource::new(db.clone());
+        let id = NoteId::new();
+        notes.upsert(&sample(id, "T")).await.unwrap();
+        let id_str = id.to_string();
+        db.call(move |c| {
+            c.execute("UPDATE notes SET pinned = 1 WHERE id = ?1", params![id_str])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        let s = source.get(&[id]).await.unwrap().remove(&id).unwrap();
+        assert!(s.pinned);
+        assert_eq!(s.view_count, 0);
+        assert_eq!(s.last_accessed_at_ms, None);
+    }
+
+    #[tokio::test]
+    async fn get_returns_stored_view_count_and_last_accessed() {
+        let db = Database::open_in_memory().unwrap();
+        let notes = SqliteNoteRepository::new(db.clone());
+        let store = SqliteSignalStore::new(db.clone());
+        let source = SqliteSignalSource::new(db.clone());
+        let id = NoteId::new();
+        notes.upsert(&sample(id, "T")).await.unwrap();
+
+        store.record_view(&id, 7000).await.unwrap();
+        store.record_view(&id, 8000).await.unwrap();
+
+        let s = source.get(&[id]).await.unwrap().remove(&id).unwrap();
+        assert_eq!(s.view_count, 2);
+        assert_eq!(s.last_accessed_at_ms, Some(8000));
     }
 }
