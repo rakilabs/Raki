@@ -143,13 +143,19 @@ pub fn run() {
                 .unwrap_or(false);
 
             let rewriter: Option<Arc<dyn QueryRewriter>> = if query_rewrite_enabled {
+                // Kimi K2.5 defaults to thinking/reasoning mode, which is 5-10x slower than
+                // necessary for query rewriting. Disable it for the rewrite provider.
+                let disable_thinking = provider == "kimi";
                 let rewrite_inner: Arc<dyn LlmProvider> =
-                    match MessagesProvider::from_env_with_model(Some(rewrite_model.clone())) {
+                    match MessagesProvider::from_env_with_options(
+                        Some(rewrite_model.clone()),
+                        disable_thinking,
+                    ) {
                         Ok(p) => Arc::new(p),
                         Err(e) => {
                             eprintln!(
-                                "rewrite model unavailable ({e}); falling back to QA model for rewrite"
-                            );
+                            "rewrite model unavailable ({e}); falling back to QA model for rewrite"
+                        );
                             // Reuse the QA provider. CloudQueryRewriter's decision will still
                             // report rewrite_model, which is a minor audit mismatch, but the
                             // feature stays up.

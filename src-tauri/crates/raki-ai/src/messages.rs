@@ -41,7 +41,7 @@ fn config_from_env() -> Result<Config, DomainError> {
 }
 
 /// Build the Messages request body. Pure — unit-testable without a network.
-fn build_request_body(req: &CompletionRequest, model: &str) -> Value {
+fn build_request_body(req: &CompletionRequest, model: &str, disable_thinking: bool) -> Value {
     let mut body = serde_json::json!({
         "model": model,
         "max_tokens": req.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
@@ -49,6 +49,11 @@ fn build_request_body(req: &CompletionRequest, model: &str) -> Value {
     });
     if let Some(system) = &req.system {
         body["system"] = Value::String(system.clone());
+    }
+    // Kimi K2.5 defaults to thinking mode, which is slow for simple rewrite tasks.
+    // Anthropic-compatible providers that don't recognize this field should ignore it.
+    if disable_thinking {
+        body["thinking"] = serde_json::json!({"type": "disabled"});
     }
     body
 }
@@ -72,6 +77,7 @@ fn parse_response(bytes: &[u8]) -> Result<String, DomainError> {
 pub struct MessagesProvider {
     client: reqwest::Client,
     config: Config,
+    disable_thinking: bool,
 }
 
 impl MessagesProvider {
@@ -83,6 +89,16 @@ impl MessagesProvider {
     /// Build from env, overriding the model. Useful when query rewriting wants a cheaper/faster
     /// model than the main QA model.
     pub fn from_env_with_model(model_override: Option<String>) -> Result<Self, DomainError> {
+        Self::from_env_with_options(model_override, false)
+    }
+
+    /// Build from env with model override and optional thinking-mode disable.
+    /// `disable_thinking` adds `"thinking": {"type": "disabled"}` to the request body, which
+    /// switches Kimi K2.5 from slow reasoning mode to fast instant mode.
+    pub fn from_env_with_options(
+        model_override: Option<String>,
+        disable_thinking: bool,
+    ) -> Result<Self, DomainError> {
         let mut config = config_from_env()?;
         if let Some(model) = model_override {
             config.model = model;
@@ -91,7 +107,11 @@ impl MessagesProvider {
             .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(|e| DomainError::Provider(format!("http client: {e}")))?;
-        Ok(Self { client, config })
+        Ok(Self {
+            client,
+            config,
+            disable_thinking,
+        })
     }
 }
 
@@ -103,7 +123,7 @@ impl LlmProvider for MessagesProvider {
 
     async fn complete(&self, req: CompletionRequest) -> Result<Completion, DomainError> {
         let url = format!("{}/v1/messages", self.config.base_url.trim_end_matches('/'));
-        let body = build_request_body(&req, &self.config.model);
+        let body = build_request_body(&req, &self.config.model, self.disable_thinking);
 
         // One retry on a transport error (timeout/connect); never on an HTTP status.
         for attempt in 0..2 {
@@ -157,7 +177,7 @@ mod tests {
 
     #[test]
     fn body_has_model_system_messages_and_max_tokens() {
-        let b = build_request_body(&req(), "kimi-k2");
+        let b = build_request_body(&req(), "kimi-k2", false);
         assert_eq!(b["model"], "kimi-k2");
         assert_eq!(b["max_tokens"], 256);
         assert_eq!(b["system"], "rules");
@@ -172,9 +192,21 @@ mod tests {
             prompt: "hi".into(),
             max_tokens: None,
         };
-        let b = build_request_body(&r, "m");
+        let b = build_request_body(&r, "m", false);
         assert!(b.get("system").is_none());
         assert_eq!(b["max_tokens"], DEFAULT_MAX_TOKENS);
+    }
+
+    #[test]
+    fn body_disables_thinking_when_asked() {
+        let b = build_request_body(&req(), "kimi-k2", true);
+        assert_eq!(b["thinking"]["type"], "disabled");
+    }
+
+    #[test]
+    fn body_omits_thinking_when_not_disabled() {
+        let b = build_request_body(&req(), "kimi-k2", false);
+        assert!(b.get("thinking").is_none());
     }
 
     #[test]

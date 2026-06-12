@@ -74,8 +74,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .or_else(|_| std::env::var("RAKI_LLM_MODEL"))
         .unwrap_or_else(|_| "kimi-k2-5".to_string());
 
-    let inner: Arc<dyn LlmProvider> =
-        Arc::new(MessagesProvider::from_env_with_model(Some(model.clone()))?);
+    // Disable Kimi K2.5 thinking mode for rewrite to match the app wiring.
+    let disable_thinking = provider == "kimi";
+    let inner: Arc<dyn LlmProvider> = Arc::new(MessagesProvider::from_env_with_options(
+        Some(model.clone()),
+        disable_thinking,
+    )?);
     let gate = Arc::new(GatedLlmProvider::new(
         inner,
         Arc::new(ConsentedTo(HashSet::from([provider.clone()]))),
