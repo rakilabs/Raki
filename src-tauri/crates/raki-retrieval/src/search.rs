@@ -73,6 +73,68 @@ pub async fn hybrid_search(
     Ok(out)
 }
 
+/// A note id paired with its retrieval score.
+pub struct ScoredNote {
+    pub note_id: NoteId,
+    pub retrieval_score: f64,
+}
+
+/// Hybrid retrieval with rank-derived scores: `1.0 / (1 + rank)`.
+/// Vector results are ranked first; keyword backfill continues the ranking.
+pub async fn hybrid_candidates_scored(
+    keyword: &dyn KeywordIndex,
+    vectors: &dyn VectorIndex,
+    embedder: &dyn EmbeddingProvider,
+    rewriter: Option<&dyn raki_domain::QueryRewriter>,
+    query: &str,
+    top_k: usize,
+) -> Result<Vec<ScoredNote>, DomainError> {
+    let ids = hybrid_candidates(keyword, vectors, embedder, rewriter, query, top_k).await?;
+    let scored: Vec<ScoredNote> = ids
+        .into_iter()
+        .take(top_k)
+        .enumerate()
+        .map(|(rank, note_id)| ScoredNote {
+            note_id,
+            retrieval_score: 1.0 / (1.0 + rank as f64),
+        })
+        .collect();
+    Ok(scored)
+}
+
+/// Hybrid retrieval boosted by memory-lifecycle signals. Off by default; used for R4 measurement.
+#[allow(clippy::too_many_arguments)]
+pub async fn hybrid_search_with_signals(
+    keyword: &dyn KeywordIndex,
+    vectors: &dyn VectorIndex,
+    embedder: &dyn EmbeddingProvider,
+    rewriter: Option<&dyn raki_domain::QueryRewriter>,
+    signal_source: &dyn raki_domain::SignalSource,
+    booster: &dyn raki_domain::SignalBooster,
+    query: &str,
+    k: usize,
+    now_ms: i64,
+) -> Result<Vec<NoteId>, DomainError> {
+    let scored = hybrid_candidates_scored(keyword, vectors, embedder, rewriter, query, k).await?;
+    if scored.is_empty() {
+        return Ok(Vec::new());
+    }
+    let note_ids: Vec<NoteId> = scored.iter().map(|s| s.note_id).collect();
+    let signals = signal_source.get(&note_ids).await?;
+
+    let mut boosted: Vec<(NoteId, f64)> = scored
+        .into_iter()
+        .map(|s| {
+            let sig = signals.get(&s.note_id).cloned().unwrap_or_default();
+            let (boosted_score, _) = booster.boost(s.retrieval_score, &sig, now_ms);
+            (s.note_id, boosted_score)
+        })
+        .collect();
+
+    boosted.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    Ok(boosted.into_iter().map(|(id, _)| id).collect())
+}
+
 /// Return up to `k` source ids best-matching `query`, best-first.
 pub async fn search(
     keyword: &dyn KeywordIndex,
@@ -423,5 +485,17 @@ mod tests {
             .unwrap();
         // sub_a matches via FakeKeyword
         assert_eq!(ids, vec![nid(ID_A)]);
+    }
+
+    #[tokio::test]
+    async fn hybrid_candidates_scored_returns_rank_derived_scores() {
+        let keyword = FakeKeyword(vec![ID_A, ID_B]);
+        let vectors = FakeVectors(vec![ID_B.to_string(), ID_C.to_string()]);
+        let scored = hybrid_candidates_scored(&keyword, &vectors, &FakeEmbed, None, "q", 3)
+            .await
+            .unwrap();
+        assert_eq!(scored.len(), 3);
+        assert_eq!(scored[0].note_id, nid(ID_B));
+        assert!(scored[0].retrieval_score > scored[1].retrieval_score);
     }
 }
