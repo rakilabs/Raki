@@ -264,6 +264,20 @@ mod tests {
         }
     }
 
+    struct ConsentedTo(String);
+    #[async_trait::async_trait]
+    impl EgressSettings for ConsentedTo {
+        async fn consented(&self) -> Result<HashSet<String>, DomainError> {
+            Ok(HashSet::from([self.0.clone()]))
+        }
+        async fn grant(&self, _: &str) -> Result<(), DomainError> {
+            Ok(())
+        }
+        async fn revoke(&self, _: &str) -> Result<(), DomainError> {
+            Ok(())
+        }
+    }
+
     #[derive(Default)]
     struct NeverConsented;
     #[async_trait::async_trait]
@@ -350,5 +364,40 @@ mod tests {
         let u = rw.understand("any").await.unwrap();
         assert!(u.is_fallback);
         assert_eq!(u.rewritten_query, "any");
+    }
+
+    #[tokio::test]
+    #[ignore = "hits the real cloud endpoint; needs RAKI_LLM_BASE_URL + ANTHROPIC_API_KEY (or KIMI_API_KEY) env vars"]
+    async fn live_cloud_query_rewriter_smoke() {
+        use crate::MessagesProvider;
+
+        let provider =
+            std::env::var("RAKI_QUERY_REWRITE_PROVIDER").unwrap_or_else(|_| "kimi".to_string());
+        let model = std::env::var("RAKI_LLM_MODEL").unwrap_or_else(|_| "kimi-k2-5".to_string());
+
+        let inner = Arc::new(MessagesProvider::from_env().unwrap());
+        let gate = Arc::new(GatedLlmProvider::new(
+            inner,
+            Arc::new(ConsentedTo(provider.clone())),
+            Arc::new(NoopLog),
+            Arc::new(FixedClock(0)),
+        ));
+        let rw = CloudQueryRewriter::new(gate, provider, model);
+
+        let u = rw
+            .understand("how do I pay at the inn?")
+            .await
+            .expect("rewriter should not error");
+
+        assert!(
+            !u.is_fallback,
+            "expected a real rewrite, got fallback: {}",
+            u.rewritten_query
+        );
+        assert!(
+            u.rewritten_query.contains("ryokan") || u.rewritten_query.contains("payment"),
+            "rewrite should mention ryokan or payment; got: {}",
+            u.rewritten_query
+        );
     }
 }
