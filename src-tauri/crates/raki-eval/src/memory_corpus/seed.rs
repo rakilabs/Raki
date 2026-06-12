@@ -466,11 +466,24 @@ mod tests {
 
     #[test]
     fn seed_corpus_has_expected_count() {
-        assert!(seed_notes().len() >= 25, "expected at least 25 seed notes");
-        assert!(
-            seed_queries().len() >= 20,
-            "expected at least 20 seed queries"
-        );
+        assert_eq!(seed_notes().len(), 26, "expected exactly 26 seed notes");
+        assert_eq!(seed_queries().len(), 26, "expected exactly 26 seed queries");
+    }
+
+    #[test]
+    fn seed_pinned_ids_are_valid() {
+        let ids: std::collections::HashSet<String> =
+            seed_notes().into_iter().map(|n| n.id.to_string()).collect();
+
+        for pinned in seed_pinned() {
+            assert!(
+                ids.contains(*pinned),
+                "pinned id {} is not present in seed_notes()",
+                pinned
+            );
+        }
+
+        assert_eq!(seed_pinned().len(), 5, "expected exactly 5 pinned note ids");
     }
 
     #[test]
