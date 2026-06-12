@@ -1,10 +1,103 @@
 //! Port traits. Adapters (storage, ai) implement these; services depend on them.
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 
 use crate::error::DomainError;
 use crate::ids::NoteId;
 use crate::note::Note;
+
+/// Aggregated behavioral signals for one note.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NoteSignals {
+    pub pinned: bool,
+    pub view_count: u64,
+    pub last_accessed_at_ms: Option<i64>,
+}
+
+/// Configuration for the multiplicative signal booster.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MixerConfig {
+    pub half_life_days: f64,
+    pub pin_boost: f64,
+    pub salience_weight: f64,
+    pub max_boost: f64,
+}
+
+impl MixerConfig {
+    pub fn new(
+        half_life_days: f64,
+        pin_boost: f64,
+        salience_weight: f64,
+        max_boost: f64,
+    ) -> Result<Self, DomainError> {
+        if !half_life_days.is_finite() || half_life_days <= 0.0 {
+            return Err(DomainError::Invalid(
+                "half_life_days must be positive and finite".into(),
+            ));
+        }
+        if !pin_boost.is_finite() || pin_boost < 0.0 {
+            return Err(DomainError::Invalid(
+                "pin_boost must be non-negative and finite".into(),
+            ));
+        }
+        if !salience_weight.is_finite() || salience_weight < 0.0 {
+            return Err(DomainError::Invalid(
+                "salience_weight must be non-negative and finite".into(),
+            ));
+        }
+        if !max_boost.is_finite() || max_boost < 1.0 {
+            return Err(DomainError::Invalid(
+                "max_boost must be >= 1.0 and finite".into(),
+            ));
+        }
+        Ok(Self {
+            half_life_days,
+            pin_boost,
+            salience_weight,
+            max_boost,
+        })
+    }
+}
+
+/// Per-signal contribution to a boost, for observability and debug.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SignalBreakdown {
+    pub recency: f64,
+    pub pin: f64,
+    pub salience: f64,
+    pub raw_boost: f64,
+    pub capped_boost: f64,
+}
+
+#[async_trait]
+pub trait SignalSource: Send + Sync {
+    /// Load signals for the given note ids. Missing ids yield default signals.
+    async fn get(
+        &self,
+        note_ids: &[NoteId],
+    ) -> Result<HashMap<NoteId, NoteSignals>, DomainError>;
+}
+
+#[async_trait]
+pub trait SignalStore: Send + Sync {
+    /// Increment view_count and update last_accessed_at for a live note.
+    async fn record_view(&self, note_id: &NoteId, now_ms: i64) -> Result<(), DomainError>;
+    /// Update last_accessed_at without incrementing view_count (e.g., on edit).
+    async fn touch(&self, note_id: &NoteId, now_ms: i64) -> Result<(), DomainError>;
+}
+
+#[async_trait]
+pub trait SignalBooster: Send + Sync {
+    /// Apply memory-lifecycle signals to a retrieval score.
+    fn boost(
+        &self,
+        retrieval_score: f64,
+        signals: &NoteSignals,
+        now_ms: i64,
+    ) -> (f64, SignalBreakdown);
+}
 
 /// Where an AI provider runs — drives the egress policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,6 +279,17 @@ mod tests {
             drop(t.upsert("", &Embedding(vec![])));
             drop(t.query(&Embedding(vec![]), 0));
         }
+    }
+
+    #[test]
+    fn mixer_config_rejects_invalid_values() {
+        use super::MixerConfig;
+        assert!(MixerConfig::new(0.0, 0.1, 0.1, 1.5).is_err());
+        assert!(MixerConfig::new(-1.0, 0.1, 0.1, 1.5).is_err());
+        assert!(MixerConfig::new(7.0, -0.1, 0.1, 1.5).is_err());
+        assert!(MixerConfig::new(7.0, 0.1, -0.1, 1.5).is_err());
+        assert!(MixerConfig::new(7.0, 0.1, 0.1, 0.5).is_err());
+        assert!(MixerConfig::new(7.0, 0.1, 0.1, f64::NAN).is_err());
     }
 }
 

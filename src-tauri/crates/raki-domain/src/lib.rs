@@ -21,7 +21,8 @@ pub use ids::NoteId;
 pub use note::Note;
 pub use ports::{
     Completion, CompletionRequest, Embedding, EmbeddingProvider, IndexingStore, KeywordHit,
-    KeywordIndex, LlmProvider, Locality, NoteRepository, PendingNote, RerankScore, Reranker,
-    VectorHit, VectorIndex,
+    KeywordIndex, LlmProvider, Locality, MixerConfig, NoteRepository, NoteSignals, PendingNote,
+    RerankScore, Reranker, SignalBooster, SignalBreakdown, SignalSource, SignalStore, VectorHit,
+    VectorIndex,
 };
 pub use query::{QueryRewriter, QueryUnderstanding};
