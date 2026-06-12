@@ -84,7 +84,6 @@ const MIGRATIONS: &[&str] = &[
         version INTEGER NOT NULL,
         FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
     ) STRICT;
-    CREATE INDEX idx_note_signals_note_id ON note_signals(note_id);
     CREATE INDEX idx_note_signals_last_accessed ON note_signals(last_accessed_at) WHERE deleted_at IS NULL;",
 ];
 
@@ -327,5 +326,34 @@ mod tests {
             )
             .unwrap();
         assert_eq!(cols, 8);
+
+        // Insert a signal row using the default view_count and a specific last_accessed_at.
+        conn.execute(
+            "INSERT INTO note_signals (id, note_id, last_accessed_at, created_at, updated_at, version)
+             VALUES ('s1', 'n1', 42, 1, 1, 1)",
+            [],
+        )
+        .unwrap();
+
+        let (view_count, last_accessed_at): (i64, Option<i64>) = conn
+            .query_row(
+                "SELECT view_count, last_accessed_at FROM note_signals WHERE note_id = 'n1'",
+                [],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?)),
+            )
+            .unwrap();
+        assert_eq!(view_count, 0, "view_count defaults to 0");
+        assert_eq!(last_accessed_at, Some(42));
+
+        // Foreign key constraint should reject a signal for a non-existent note.
+        let fk_result = conn.execute(
+            "INSERT INTO note_signals (id, note_id, last_accessed_at, created_at, updated_at, version)
+             VALUES ('s2', 'no-such-note', 1, 1, 1, 1)",
+            [],
+        );
+        assert!(
+            fk_result.is_err(),
+            "signal for non-existent note must fail FK"
+        );
     }
 }
