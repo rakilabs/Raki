@@ -45,31 +45,13 @@ pub async fn record_baseline(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use raki_ai::FakeEmbeddingProvider;
-    use raki_domain::body_to_text;
-
     use super::*;
-    use crate::build_in_memory_index;
+    use crate::memory_corpus::index::index_seed_corpus;
     use crate::memory_corpus::seed::seed_notes;
-    use raki_domain::NoteRepository;
 
     #[tokio::test]
     async fn record_baseline_with_fake_adapters_produces_self_describing_results() {
-        let (_db, repo, keyword, vectors) = build_in_memory_index().unwrap();
-        let embedder = Arc::new(FakeEmbeddingProvider::new(384));
-
-        for note in seed_notes() {
-            repo.upsert(&note).await.unwrap();
-            let text = format!("{}\n\n{}", note.title, body_to_text(&note.body));
-            let emb = embedder.embed(std::slice::from_ref(&text)).await.unwrap();
-            let emb = emb
-                .into_iter()
-                .next()
-                .expect("fake embedder returns one embedding per input");
-            vectors.upsert(&note.id.to_string(), &emb).await.unwrap();
-        }
+        let (_db, _repo, keyword, vectors, embedder) = index_seed_corpus().await;
 
         let results = record_baseline(&keyword, &vectors, embedder.as_ref(), seed_notes().len())
             .await
