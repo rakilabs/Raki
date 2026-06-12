@@ -10,10 +10,6 @@ use raki_domain::{
 
 use crate::indexing::IndexingService;
 
-// signal_source and signal_booster are wired now and consumed by the retrieval
-// integration in the next plan step; allow dead_code so the intermediate state
-// compiles under `-D warnings`.
-#[allow(dead_code)]
 pub struct AppState {
     pub notes: Arc<dyn NoteRepository>,
     pub keyword: Arc<dyn KeywordIndex>,
@@ -40,9 +36,13 @@ pub struct AppState {
     /// Optional query rewriter (cloud LLM) for the Ask flow only.
     pub rewriter: Option<Arc<dyn QueryRewriter>>,
     /// Source of memory-lifecycle signals for retrieval ranking.
+    // Wired now; consumed by the retrieval integration in the next plan step.
+    #[allow(dead_code)]
     pub signal_source: Arc<dyn SignalSource>,
     /// Mutable store for memory-lifecycle signals.
     pub signal_store: Arc<dyn SignalStore>,
     /// Multiplicative booster applied to retrieval scores using note signals.
+    // Wired now; consumed by the retrieval integration in the next plan step.
+    #[allow(dead_code)]
     pub signal_booster: Arc<dyn SignalBooster>,
 }
