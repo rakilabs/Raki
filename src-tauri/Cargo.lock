@@ -4110,6 +4110,7 @@ dependencies = [
  "pulldown-cmark",
  "raki-ai",
  "raki-domain",
+ "raki-memory",
  "raki-retrieval",
  "raki-storage",
  "serde",
