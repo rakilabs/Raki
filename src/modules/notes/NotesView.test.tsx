@@ -3,12 +3,21 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./api", () => ({
-  notesKeys: { all: ["notes"], search: (q: string) => ["notes", "search", q] },
+  notesKeys: {
+    all: ["notes"],
+    search: (q: string) => ["notes", "search", q],
+    trashed: ["notes", "trashed"],
+  },
   notesApi: {
     list: vi.fn(),
     create: vi.fn(),
     search: vi.fn(),
     update: vi.fn(),
+    delete: vi.fn(),
+    restore: vi.fn(),
+    listTrashed: vi.fn(),
+    exportForEval: vi.fn(),
+    recordView: vi.fn(),
   },
 }));
 

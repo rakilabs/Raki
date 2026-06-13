@@ -26,6 +26,7 @@
 | Egress substrate | gate, audit log, consent, mode (Slice 1) | `crates/raki-ai` egress |
 | Grounded cloud QA | MessagesProvider, groundedness, AskBox (Slice 2) | `crates/raki-generate` |
 | **Notes end-to-end** | body editor (draft), real content into the pipeline (Slice 3) | `src/modules/notes`, ADR-0004 |
+| Chunk-eval baseline | whole-note vs block-level comparison; synthetic baseline committed; real-notes comparison runnable | `docs/eval/chunking-baseline.md`, `docs/eval/chunking-real-notes-summary.md`, `raki-eval/src/bin/chunk-eval.rs` |
 
 ---
 
@@ -78,8 +79,13 @@ tripwire.
 - Spec/plan: `docs/superpowers/specs/2026-06-10-r2-chunking-production-migration-design.md`.
 
 > **Binding verdict (D8):** the real-notes corpus Success@3 gate is still open — the migration is
-> shipped, but the +0.05 lift on the long stratum must be validated once real notes accumulate.
-> Chunking is feature-flagged (`use_contextual_prefix`, default OFF) for safe rollback.
+> shipped, but the +0.05 lift on the **long** stratum must be validated once real notes accumulate.
+> A first real-notes chunking comparison ran (`chunk-eval --with-real`, 52 notes / 31 queries):
+> chunking without prefix hurts; title+head prefix gives a small directional lift (+0.03 Recall@10),
+> but the corpus contains **zero long notes**, so D8 cannot be decided. `chunk-eval --write` now
+> completes in ~2.5 min (was timing out) after batching chunk embeddings; the synthetic design
+> baseline is committed to `docs/eval/chunking-baseline.md` and the content-free real-notes summary
+> to `docs/eval/chunking-real-notes-summary.md`.
 
 > **Cross-cutting:** R2 unblocks **R3** (Track A). The real-notes corpus that feeds R0's faithful tier
 > and R2's binding verdict is still the enabler for measurement — P1 (Track B) remains the path to
@@ -132,7 +138,7 @@ future re-testing.
 
 ## Track B — Product Trust & Ownership *(parallel enabler — runs alongside Track A)*
 
-### ⬜ P1 — Privacy & data-ownership
+### ✅ P1 — Privacy & data-ownership
 **Goal:** note delete / trash + restore (over the built `soft_delete`); a Settings surface —
 egress audit-log viewer and consent management.
 **Why parallel, not deferred:** ships Raki's non-negotiable values (private, owned, recoverable,
@@ -140,6 +146,11 @@ explicit egress — all currently only half-delivered: the audit log is *recorde
 **and** makes the app trustworthy enough to hold real notes → which feeds R0's real-data tier.
 **Substrate already built:** `egress_log`, `cloud_consent`, `EgressSettings`, `soft_delete` — this
 slice exposes them; it is not new infrastructure.
+**Status:** ✅ Done. Backend commands (`delete_note`, `restore_note`, `list_trashed_notes`,
+`get_egress_settings`, `grant/revoke_provider_consent`, `list_egress_log`), `NoteDto.deleted_at`,
+frontend trash UI in `NotesView.tsx`, and Settings route (`/settings`) with Privacy + Audit Log
+tabs are implemented and verified. Spec/plan:
+`docs/superpowers/plans/2026-06-10-p1-privacy-data-ownership.md`.
 
 ---
 

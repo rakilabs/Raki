@@ -15,6 +15,7 @@ export function NotesView() {
   const [editTitle, setEditTitle] = createSignal("");
   const [editBody, setEditBody] = createSignal("");
   const [showTrash, setShowTrash] = createSignal(false);
+  const [exportMessage, setExportMessage] = createSignal<string | null>(null);
 
   createEffect(() => {
     const q = search();
@@ -86,6 +87,20 @@ export function NotesView() {
     },
   }));
 
+  const exportForEval = createMutation(() => ({
+    mutationFn: () => notesApi.exportForEval(),
+    onSuccess: (res) => {
+      setExportMessage(
+        `Exported ${res.exported} note(s) to eval-data/real/notes/`
+      );
+      setTimeout(() => setExportMessage(null), 4000);
+    },
+    onError: () => {
+      setExportMessage("Export failed — see backend logs.");
+      setTimeout(() => setExportMessage(null), 4000);
+    },
+  }));
+
   return (
     <section>
       <h1>Notes</h1>
@@ -126,6 +141,18 @@ export function NotesView() {
         />
         Show trash
       </label>
+
+      <button
+        type="button"
+        onClick={() => exportForEval.mutate()}
+        disabled={exportForEval.isPending || showTrash()}
+        title="Export live notes to eval-data/real/notes/ for local eval"
+      >
+        Export for eval
+      </button>
+      <Show when={exportMessage()}>
+        {(msg) => <p role="status">{msg()}</p>}
+      </Show>
 
       <div class="notes-layout">
         <Show when={!notes.isLoading} fallback={<p>Loading…</p>}>

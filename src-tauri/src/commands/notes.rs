@@ -4,7 +4,7 @@ use tauri::State;
 
 use raki_domain::{text_to_body, DomainError, Note, NoteId};
 
-use crate::dto::{CreateNoteInput, NoteDto, UpdateNoteInput};
+use crate::dto::{CreateNoteInput, ExportNotesForEvalResult, NoteDto, UpdateNoteInput};
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -257,6 +257,79 @@ pub async fn list_trashed_notes(state: State<'_, AppState>) -> Result<Vec<NoteDt
     Ok(notes.into_iter().map(NoteDto::from).collect())
 }
 
+/// Turn a note title into a filesystem-safe slug. Collapses non-alphanumerics to dashes,
+/// trims leading/trailing dashes, and lowercases. Empty titles fall back to `untitled`.
+fn title_to_slug(title: &str) -> String {
+    let mut out = String::with_capacity(title.len());
+    let mut prev_dash = true; // so leading non-alpha becomes nothing
+    for c in title.chars() {
+        if c.is_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        "untitled".to_string()
+    } else {
+        out
+    }
+}
+
+/// Export all live notes to `eval-data/real/notes/*.md` so they can be used by the local
+/// real-data eval harness (`cargo run -p raki-eval --bin real-eval`). Files are written as
+/// Markdown with YAML frontmatter; the eval loader strips frontmatter and uses the H1 as title.
+#[tauri::command]
+pub async fn export_notes_for_eval(
+    state: State<'_, AppState>,
+) -> Result<ExportNotesForEvalResult, AppError> {
+    // Same directory the `real-eval` binary reads from: project-root/eval-data/real.
+    let eval_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("eval-data")
+        .join("real");
+    let notes_dir = eval_dir.join("notes");
+    std::fs::create_dir_all(&notes_dir).map_err(|e| AppError {
+        kind: "io_error".into(),
+        message: format!("cannot create eval notes dir: {e}"),
+    })?;
+
+    let notes = state.notes.list().await?;
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut exported = 0;
+
+    for note in notes {
+        let base = title_to_slug(&note.title);
+        let count = seen.entry(base.clone()).or_insert(0);
+        *count += 1;
+        let slug = if *count == 1 {
+            base
+        } else {
+            format!("{base}-{}", count)
+        };
+
+        let path = notes_dir.join(format!("{slug}.md"));
+        let body_text = raki_domain::body_to_text(&note.body);
+        let content = format!(
+            "---\ntitle: {}\nid: {}\n---\n\n# {}\n\n{}\n",
+            note.title, note.id, note.title, body_text
+        );
+        std::fs::write(&path, content).map_err(|e| AppError {
+            kind: "io_error".into(),
+            message: format!("failed to write {path:?}: {e}"),
+        })?;
+        exported += 1;
+    }
+
+    Ok(ExportNotesForEvalResult { exported })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,6 +337,18 @@ mod tests {
     #[test]
     fn cap_text_passes_short_strings_through() {
         assert_eq!(cap_text("hello", 4096), "hello");
+    }
+
+    #[test]
+    fn title_to_slug_sanitizes_and_lowercases() {
+        assert_eq!(title_to_slug("Espresso Dialing!"), "espresso-dialing");
+        assert_eq!(title_to_slug("  Postgres -- Pooling  "), "postgres-pooling");
+        assert_eq!(title_to_slug("---"), "untitled");
+    }
+
+    #[test]
+    fn title_to_slug_collapses_multiple_dashes() {
+        assert_eq!(title_to_slug("a--b__c"), "a-b-c");
     }
 
     #[test]

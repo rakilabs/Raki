@@ -75,7 +75,7 @@ use std::sync::Arc;
 use crate::chunk::{chunk, ChunkStrategy, PrefixMode, Rollup};
 use async_trait::async_trait;
 use raki_domain::{
-    DomainError, EmbeddingProvider, Note, NoteId, NoteRepository, QueryRewriter,
+    DomainError, Embedding, EmbeddingProvider, Note, NoteId, NoteRepository, QueryRewriter,
     QueryUnderstanding, Reranker, VectorIndex,
 };
 use raki_retrieval::{
@@ -341,6 +341,10 @@ pub async fn run_eval_over(
     // fixture_of maps both chunk ids and the note uuid to the fixture slug.
     let mut fixture_of: HashMap<String, String> = HashMap::new();
     let mut text_of: HashMap<String, String> = HashMap::new();
+    // Collect all chunk (id, text) pairs across the corpus first, then embed in one batch.
+    // This mirrors `benchmark.rs` and avoids the per-chunk ONNX session overhead that made
+    // `chunk-eval` timeout on small corpora.
+    let mut chunk_specs: Vec<(String, String)> = Vec::new();
     for (idx, cn) in corpus.iter().enumerate() {
         const DUMMY_EPOCH_MS: i64 = 1000;
         let mut note = Note::new(cn.title.clone(), cn.body.clone(), DUMMY_EPOCH_MS);
@@ -369,15 +373,28 @@ pub async fn run_eval_over(
             } else {
                 format!("{uuid}#{j}")
             };
-            let emb = embedder.embed(std::slice::from_ref(text)).await?;
-            let emb = emb.first().ok_or_else(|| {
-                DomainError::Provider("embedder returned empty batch".to_string())
-            })?;
-            vectors.upsert(&chunk_id, emb).await?;
             fixture_of.insert(chunk_id.clone(), cn.id.clone());
-            text_of.insert(chunk_id, text.clone());
+            text_of.insert(chunk_id.clone(), text.clone());
+            chunk_specs.push((chunk_id, text.clone()));
         }
     }
+
+    // Batch embed all chunks for this arm in one ONNX session, then upsert in one transaction.
+    let texts: Vec<String> = chunk_specs.iter().map(|(_, t)| t.clone()).collect();
+    let embs = embedder.embed(&texts).await?;
+    if embs.len() != texts.len() {
+        return Err(DomainError::Provider(format!(
+            "embedder returned {} embeddings for {} chunks",
+            embs.len(),
+            texts.len()
+        )));
+    }
+    let batch: Vec<(String, Embedding)> = chunk_specs
+        .into_iter()
+        .zip(embs.into_iter())
+        .map(|((id, _), emb)| (id, emb))
+        .collect();
+    vectors.upsert_batch(&batch).await?;
 
     let mut per_query: Vec<QueryResult> = Vec::new();
     let mut unscored: HashSet<String> = HashSet::new();
@@ -805,6 +822,37 @@ mod tests {
             cov.vector.scores.recall_cov.is_some(),
             "coverage query must produce recall@K_cov"
         );
+    }
+
+    #[tokio::test]
+    async fn harness_scores_chunked_corpus_with_fake_embedder() {
+        // Exercises the batched chunk-embedding path that `chunk-eval` relies on.
+        // Regression guard for the per-chunk embedding overhead that caused timeouts.
+        let run = run_eval_over(
+            &load_chunking_corpus(),
+            &load_chunking_queries(),
+            Arc::new(FakeEmbeddingProvider::new(384)),
+            Arc::new(FakeReranker),
+            10,
+            ChunkStrategy::Blocks,
+            PrefixMode::Title,
+            Rollup::MinRank,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(!run.per_query.is_empty());
+        assert!(run
+            .report
+            .by_category
+            .iter()
+            .any(|c| c.category == "buried-fact-long-note"));
+        for c in &run.report.by_category {
+            assert!(c.keyword.recall >= 0.0 && c.keyword.recall <= 1.0);
+            assert!(c.vector.map >= 0.0 && c.vector.map <= 1.0);
+            assert!(c.hybrid.recall >= 0.0 && c.hybrid.recall <= 1.0);
+            assert!(c.reranked.recall >= 0.0 && c.reranked.recall <= 1.0);
+        }
     }
 
     #[test]

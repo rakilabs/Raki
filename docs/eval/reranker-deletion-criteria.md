@@ -1,11 +1,16 @@
 # Reranker deletion criterion (Slice 4, D-DELETE)
 
+> **Status (2026-06-13):** Reranker is **disabled in production search** pending the binding
+> kill-switch. The first real-data eval (31 queries on the LifeOS corpus) showed reranked
+> underperforming hybrid: ΔSuccess@3 -0.065, ΔMRR -0.033. The kill-switch's binding threshold
+> (≥100 real-queries) has not been reached, so this is a directional disable, not a final deletion.
+
 > **Status (2026-06-08):** Reranker is **attached-pending-validation** in production (ADR-0008) on
 > directional SciFact evidence (+0.0313 nDCG@10). This kill-switch remains the **binding** test:
 > the reranker stays only if it beats hybrid by +0.03 nDCG on ≥100 real-notes queries, else it is
 > removed.
 
-Status: OPEN — decided once real-notes ground truth exists.
+Status: DIRECTIONAL DISABLE — binding decision at ≥100 real-queries.
 
 The cross-encoder reranker (Slice 4) was built as an eval-substrate integration test on a
 synthetic 30-note corpus that **cannot see its primary value** (recall-rescue): vector

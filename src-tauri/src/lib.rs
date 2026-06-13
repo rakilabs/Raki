@@ -12,8 +12,8 @@ use std::sync::Arc;
 use tauri::Manager;
 
 use raki_ai::{
-    CloudQueryRewriter, FakeEmbeddingProvider, FastEmbedProvider, FastEmbedReranker,
-    GatedLlmProvider, MessagesProvider,
+    CloudQueryRewriter, FakeEmbeddingProvider, FastEmbedProvider, GatedLlmProvider,
+    MessagesProvider,
 };
 use raki_domain::{
     Clock, Completion, CompletionRequest, DomainError, EmbeddingProvider, IndexingStore,
@@ -26,8 +26,8 @@ use raki_storage::{
 };
 
 use crate::commands::notes::{
-    create_note, delete_note, get_note, list_notes, list_trashed_notes, restore_note, search_notes,
-    update_note,
+    create_note, delete_note, export_notes_for_eval, get_note, list_notes, list_trashed_notes,
+    restore_note, search_notes, update_note,
 };
 use crate::commands::qa::answer_question;
 use crate::commands::settings::{
@@ -92,15 +92,10 @@ pub fn run() {
                 }
             };
 
-            let reranker: Option<Arc<dyn Reranker>> = match FastEmbedReranker::try_new() {
-                Ok(r) => Some(Arc::new(r)),
-                Err(e) => {
-                    eprintln!(
-                        "reranker unavailable ({e}); search runs without reranking this session"
-                    );
-                    None
-                }
-            };
+            // The reranker is disabled in production as of the first real-data eval:
+            // 31 queries showed reranked S@3 = 0.84 vs hybrid S@3 = 0.90, MRR 0.76 vs 0.79.
+            // It remains available in raki-ai/raki-retrieval for future re-evaluation.
+            let reranker: Option<Arc<dyn Reranker>> = None;
 
             let index = Arc::new(IndexingService::new(
                 store,
@@ -216,6 +211,7 @@ pub fn run() {
             delete_note,
             restore_note,
             list_trashed_notes,
+            export_notes_for_eval,
             answer_question,
             get_egress_settings,
             grant_provider_consent,

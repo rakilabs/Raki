@@ -35,6 +35,10 @@ path = "src/bin/record_memory_baseline.rs"
 name = "measure_memory_signals"
 path = "src/bin/measure_memory_signals.rs"
 
+[[bin]]
+name = "import-lifeos"
+path = "src/bin/import-lifeos.rs"
+
 [dependencies]
 raki-domain = { workspace = true }
 raki-storage = { workspace = true }

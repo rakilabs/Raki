@@ -1,8 +1,8 @@
 //! `chunk-eval`: LOCAL whole-note-vs-chunked retrieval comparison. Runs the prefix × rollup arms
-//! over the committed synthetic chunking fixtures (and, when present, the real-data set), printing
-//! whole-vs-chunked deltas stratified by note length. Vector + reranked are headlined; hybrid is demoted
-//! but read as a DEPLOYMENT-RISK signal (it mirrors the first production state). Directional only —
-//! see the chunking spec, Limitations.
+//! over the committed synthetic chunking fixtures, printing whole-vs-chunked deltas. The optional
+//! real-data set is evaluated only when `--with-real` is passed (it is slow and stdout-only).
+//! Vector + reranked are headlined; hybrid is demoted but read as a DEPLOYMENT-RISK signal
+//! (it mirrors the first production state). Directional only — see the chunking spec, Limitations.
 
 use std::sync::Arc;
 
@@ -31,6 +31,7 @@ fn stratum(body: &str) -> &'static str {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let write = std::env::args().any(|a| a == "--write");
+    let with_real = std::env::args().any(|a| a == "--with-real");
     let corpus = load_chunking_corpus();
     let queries = load_chunking_queries();
     let embedder = Arc::new(FastEmbedProvider::try_new()?);
@@ -117,68 +118,73 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("(stdout only; pass --write to persist docs/eval/chunking-baseline.md)");
     }
 
-    let real_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../eval-data/real");
-    match raki_eval::local_corpus::load_local_raw(&real_dir) {
-        Ok(data) => {
-            println!("\n# chunk-eval (REAL notes — LOCAL, never committed). k={K}");
-            let rstrata: std::collections::BTreeMap<&str, usize> = {
-                let mut m = std::collections::BTreeMap::new();
-                for cn in &data.corpus {
-                    *m.entry(stratum(&cn.body)).or_insert(0) += 1;
+    if with_real {
+        let real_dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../eval-data/real");
+        match raki_eval::local_corpus::load_local_raw(&real_dir) {
+            Ok(data) => {
+                println!("\n# chunk-eval (REAL notes — LOCAL, never committed). k={K}");
+                let rstrata: std::collections::BTreeMap<&str, usize> = {
+                    let mut m = std::collections::BTreeMap::new();
+                    for cn in &data.corpus {
+                        *m.entry(stratum(&cn.body)).or_insert(0) += 1;
+                    }
+                    m
+                };
+                println!(
+                    "notes per stratum: {rstrata:?}  (promotion gate reads the LONG stratum — spec D8)"
+                );
+                let whole = run_eval_over(
+                    &data.corpus,
+                    &data.queries,
+                    embedder.clone(),
+                    reranker.clone(),
+                    K,
+                    ChunkStrategy::WholeNote,
+                    PrefixMode::Title,
+                    Rollup::MinRank,
+                    None,
+                )
+                .await?;
+                for (pl, p) in prefixes {
+                    for (rl, r) in rollups {
+                        let chunked = run_eval_over(
+                            &data.corpus,
+                            &data.queries,
+                            embedder.clone(),
+                            reranker.clone(),
+                            K,
+                            ChunkStrategy::Blocks,
+                            p,
+                            r,
+                            None,
+                        )
+                        .await?;
+                        println!("## REAL prefix={pl} rollup={rl}");
+                        line(
+                            "vector (headline)",
+                            whole.report.overall_vector,
+                            chunked.report.overall_vector,
+                        );
+                        line(
+                            "reranked (headline)",
+                            whole.report.overall_reranked,
+                            chunked.report.overall_reranked,
+                        );
+                        line(
+                            "hybrid (deploy-risk)",
+                            whole.report.overall_hybrid,
+                            chunked.report.overall_hybrid,
+                        );
+                    }
                 }
-                m
-            };
-            println!(
-                "notes per stratum: {rstrata:?}  (promotion gate reads the LONG stratum — spec D8)"
-            );
-            let whole = run_eval_over(
-                &data.corpus,
-                &data.queries,
-                embedder.clone(),
-                reranker.clone(),
-                K,
-                ChunkStrategy::WholeNote,
-                PrefixMode::Title,
-                Rollup::MinRank,
-                None,
-            )
-            .await?;
-            for (pl, p) in prefixes {
-                for (rl, r) in rollups {
-                    let chunked = run_eval_over(
-                        &data.corpus,
-                        &data.queries,
-                        embedder.clone(),
-                        reranker.clone(),
-                        K,
-                        ChunkStrategy::Blocks,
-                        p,
-                        r,
-                        None,
-                    )
-                    .await?;
-                    println!("## REAL prefix={pl} rollup={rl}");
-                    line(
-                        "vector (headline)",
-                        whole.report.overall_vector,
-                        chunked.report.overall_vector,
-                    );
-                    line(
-                        "reranked (headline)",
-                        whole.report.overall_reranked,
-                        chunked.report.overall_reranked,
-                    );
-                    line(
-                        "hybrid (deploy-risk)",
-                        whole.report.overall_hybrid,
-                        chunked.report.overall_hybrid,
-                    );
-                }
+                eprintln!("note: synthetic numbers settle DESIGN only; the verdict is the real-notes run (spec D7/D8).");
             }
+            Err(e) => eprintln!("\n(real-notes run skipped: {e})"),
         }
-        Err(e) => eprintln!("\n(real-notes run skipped: {e})"),
+    } else {
+        eprintln!("note: pass --with-real to also evaluate eval-data/real (slow; stdout-only).");
     }
 
-    eprintln!("note: synthetic numbers settle DESIGN only; the verdict is the real-notes run (spec D7/D8).");
     Ok(())
 }

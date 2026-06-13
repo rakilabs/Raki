@@ -1,7 +1,9 @@
 # Real-data eval protocol (local, private)
 
 Machinery: `cargo run -p raki-eval --bin real-eval` (real model; reads `eval-data/real/`).
-Setup: put `.md` notes in `eval-data/real/notes/`, write `eval-data/real/queries.json`
+Setup: put `.md` notes in `eval-data/real/notes/`, write `eval-data/real/queries.json`.
+If you are dogfooding the Raki app itself, use the **"Export for eval"** button in the Notes view
+(or the `export_notes_for_eval` Tauri command) to dump live notes to `eval-data/real/notes/*.md`.
 (`[{ "query", "relevant_ids": ["note-slug"], "primary"?: "slug", "category"?: "..." }]`).
 
 ## Labeling discipline (D6) — highest-leverage first
@@ -35,8 +37,13 @@ Re-running early is fine; the dates are the *latest* a run should slip to.
 - [ ] 2027-06-06 — quarterly (then continue quarterly)
 
 ## Chunking measurement (added for the chunk-eval slice)
-- Run `cargo run -p raki-eval --bin chunk-eval`; it reads `eval-data/real/` via the raw-markdown
-  loader (preserves paragraph/heading structure for chunking) and prints whole-vs-chunked deltas.
+- Run `cargo run -p raki-eval --bin chunk-eval -- --with-real`; it reads `eval-data/real/` via the
+  raw-markdown loader (preserves paragraph/heading structure for chunking) and prints whole-vs-chunked
+  deltas. The default run (`chunk-eval` without `--with-real`) evaluates only the committed synthetic
+  fixtures and is much faster (~2.5 min vs ~20 min).
+- Record the synthetic baseline with `cargo run -p raki-eval --bin chunk-eval -- --write`.
+- Aggregate real-notes chunking results can be committed (content-free) to
+  `docs/eval/chunking-real-notes-summary.md`.
 - **Sample the messiest notes**, not just the longest: long multi-section notes, list-heavy notes,
   code-heavy notes, and mixed-language notes — these are where structural chunking and
   prefix↔tokenization interactions break. The promotion gate reads the **long-note stratum**.

@@ -5,6 +5,7 @@ import type { CreateNoteInput } from "./bindings/CreateNoteInput";
 import type { EgressLogEntryDto } from "./bindings/EgressLogEntryDto";
 import type { EgressPreviewDto } from "./bindings/EgressPreviewDto";
 import type { EgressSettingsDto } from "./bindings/EgressSettingsDto";
+import type { ExportNotesForEvalResult } from "./bindings/ExportNotesForEvalResult";
 import type { NoteDto } from "./bindings/NoteDto";
 import type { RecordNoteViewInput } from "./bindings/RecordNoteViewInput";
 import type { UpdateNoteInput } from "./bindings/UpdateNoteInput";
@@ -16,6 +17,7 @@ export type {
   EgressLogEntryDto,
   EgressPreviewDto,
   EgressSettingsDto,
+  ExportNotesForEvalResult,
   NoteDto,
   RecordNoteViewInput,
   UpdateNoteInput,
@@ -36,6 +38,8 @@ export const commands = {
   deleteNote: (id: string) => invoke<null>("delete_note", { id }),
   restoreNote: (id: string) => invoke<NoteDto>("restore_note", { id }),
   listTrashedNotes: () => invoke<NoteDto[]>("list_trashed_notes"),
+  exportNotesForEval: () =>
+    invoke<ExportNotesForEvalResult>("export_notes_for_eval"),
   answerQuestion: (query: string) =>
     invoke<AnswerOutcome>("answer_question", { query }),
   getEgressSettings: () => invoke<EgressSettingsDto>("get_egress_settings"),
