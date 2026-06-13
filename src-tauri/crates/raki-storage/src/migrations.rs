@@ -33,7 +33,7 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE notes ADD COLUMN content_hash TEXT;
     ALTER TABLE notes ADD COLUMN embedded_hash TEXT;
     ALTER TABLE notes ADD COLUMN embedded_model TEXT;",
-    // V4: egress audit log + cloud consent + a tiny settings kv (egress mode). Audit/system tables:
+    // V4: egress audit log + cloud consent + a tiny settings kv (reserved for future app settings). Audit/system tables:
     // id + timestamps, no soft-delete/version (not user-data).
     "CREATE TABLE egress_log (
         id TEXT PRIMARY KEY,

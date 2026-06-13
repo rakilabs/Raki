@@ -22,7 +22,7 @@ pub struct AppState {
     pub index: Arc<IndexingService>,
     /// The only cloud-completion path (wraps MessagesProvider; reads consent live; logs egress).
     pub gate: Arc<GatedLlmProvider>,
-    /// Consent + mode mutation surface for the consent commands.
+    /// Per-provider consent mutation surface for the consent commands.
     pub settings: Arc<dyn EgressSettings>,
     /// Audit log query surface for the settings UI.
     pub egress_log: Arc<dyn EgressLog>,

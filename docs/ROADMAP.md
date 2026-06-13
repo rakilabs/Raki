@@ -134,7 +134,7 @@ future re-testing.
 
 ### ⬜ P1 — Privacy & data-ownership
 **Goal:** note delete / trash + restore (over the built `soft_delete`); a Settings surface —
-egress audit-log viewer, consent management, local-only/cloud mode toggle.
+egress audit-log viewer and consent management.
 **Why parallel, not deferred:** ships Raki's non-negotiable values (private, owned, recoverable,
 explicit egress — all currently only half-delivered: the audit log is *recorded but invisible*),
 **and** makes the app trustworthy enough to hold real notes → which feeds R0's real-data tier.

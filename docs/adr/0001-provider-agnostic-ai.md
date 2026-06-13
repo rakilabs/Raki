@@ -25,7 +25,7 @@ We will define provider **ports** in `raki-domain` — `EmbeddingProvider` and `
 them as swappable **adapters** in `raki-ai` for both **local** (Ollama, fastembed) and **cloud**
 (OpenAI/Anthropic-compatible) backends. The user selects the active provider **per capability** at runtime.
 All model access flows through `raki-ai`, which owns a **registry**, **retries/backoff**, and an
-**egress/consent policy** (local-only mode, per-provider consent, logging of what left the device).
+**egress/consent policy** (local providers need no consent; cloud providers require per-provider consent and logging of what left the device).
 
 ## Consequences
 
@@ -40,7 +40,7 @@ All model access flows through `raki-ai`, which owns a **registry**, **retries/b
 
 **Neutral / follow-ups**
 - Default local embeddings via fastembed so retrieval works with zero setup; cloud is opt-in.
-- "Local-only mode" must hard-disable network model calls, verified by test.
+- Local providers are identified by `Locality::Local` and bypass consent/audit; cloud providers are identified by `Locality::Cloud` and require consent plus audit logging.
 
 ## Alternatives considered
 

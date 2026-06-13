@@ -24,7 +24,7 @@ enforced privacy floor instead of reinventing one.
 - `EgressDecision` + `SourceId` + `EgressLogId` + the `EgressLog`/`EgressSettings` ports in
   **`raki-domain`** (the dependency-correct home).
 - `AssembledContext` in `raki-memory` gains a `domain::EgressDecision`.
-- `EgressPolicy` + a private `approve()` + a `GatedLlmProvider` wrapper in `raki-ai` — the **only** way
+- A locality-aware private `approve()` + a `GatedLlmProvider` wrapper in `raki-ai` — the **only** way
   to obtain a completion, and the **only** thing the app layer is handed.
 - An `egress_log` + `cloud_consent` in `raki-storage` (migration V4), behind the domain ports.
 - Exhaustive tests with fakes. **No** `MessagesProvider`, command, or frontend.
@@ -52,9 +52,8 @@ enforced privacy floor instead of reinventing one.
   - `EgressRecord { id: EgressLogId, decision: EgressDecision, completed_at: i64, success: bool }` — the
     *persisted* form: the decision **plus** the outcome.
   - `trait EgressLog { async fn record(&self, rec: &EgressRecord) -> Result<(), DomainError>; }` and
-    `trait EgressSettings { async fn mode(&self) -> Result<Mode, DomainError>; async fn consented(&self)
-    -> Result<HashSet<String>, DomainError>; async fn set_mode(...); async fn grant(provider); async fn
-    revoke(provider); }` with `enum Mode { LocalOnly, CloudAllowed }`.
+    `trait EgressSettings { async fn consented(&self) -> Result<HashSet<String>, DomainError>; async fn
+    grant(provider); async fn revoke(provider); }`.
 
 - **D2 — `AssembledContext` carries the egress decision; assembly stays pure.** Add `pub egress:
   EgressDecision` to the struct in `raki-memory/src/context.rs` (legal: `raki-memory → raki-domain`). A
@@ -62,12 +61,12 @@ enforced privacy floor instead of reinventing one.
   included items (their `SourceId`s and summed `token_estimate`). The budgeted assembler is otherwise
   unchanged. **Empty assembly is representable** (zero items) and is rejected at the gate (D4), not here.
 
-- **D3 — `EgressPolicy` + a private `approve()` in `raki-ai`.** `EgressPolicy { mode: Mode,
-  consented: HashSet<String> }` is a **per-call snapshot** built from `EgressSettings`, never cached.
-  `approve(decision, policy) -> Result<(), EgressDenied>` is a **private** method of the gate (exposed
-  only to `#[cfg(test)]`): empty `source_ids` ⇒ `EmptyContext`; `LocalOnly` ⇒ `LocalOnlyMode`;
-  `CloudAllowed` + provider not in `consented` ⇒ `ConsentRequired`; else `Ok`. **Default `Mode` is
-  `LocalOnly`.**
+- **D3 — `GatedLlmProvider` policy: provider locality + per-provider consent.** The gate reads the
+  inner provider's `Locality` at call time and the live `consented` set from `EgressSettings`.
+  `approve(decision, locality, consented) -> Result<(), EgressDenied>` is a **private** method:
+  empty `source_ids` ⇒ `EmptyContext`; `Locality::Local` ⇒ always `Ok` (nothing leaves the device,
+  no audit row); `Locality::Cloud` + provider not in `consented` ⇒ `ConsentRequired`; else `Ok`.
+  No global mode exists; the provider itself declares whether it runs locally.
 
 - **D4 — `GatedLlmProvider` makes an un-gated call unrepresentable, reads consent live, logs the
   truth.** `GatedLlmProvider { inner: Arc<dyn LlmProvider>, settings: Arc<dyn EgressSettings>, log:
@@ -75,8 +74,8 @@ enforced privacy floor instead of reinventing one.
   `complete_gated(&self, egress: &EgressDecision, req: CompletionRequest) -> Result<Completion,
   EgressError>` — it takes the **`EgressDecision`** (never `AssembledContext`; the gate is blind to
   context internals), so the caller passes `ctx.egress`. Flow:
-  1. snapshot policy from `settings.mode()` + `settings.consented()` (**live, every call**);
-  2. `approve(egress, &policy)?` — on denial, return `EgressError` with **no send and no log row**;
+  1. read `inner.locality()` and `settings.consented()` (**live, every call**);
+  2. `approve(egress, locality, &consented)?` — on denial, return `EgressError` with **no send and no log row**;
   3. `let result = inner.complete(req).await;`
   4. `log.record(EgressRecord { id: EgressLogId::new(), decision: egress.clone(), completed_at: now,
      success: result.is_ok() })` — logged **after** the call, recording what **did** (or did not) leave;
@@ -90,10 +89,9 @@ enforced privacy floor instead of reinventing one.
   soft-delete/version suite (soft-deleting an audit row is nonsensical). Migration **V4**:
   - `egress_log (id TEXT PRIMARY KEY /*uuid v7*/, created_at INTEGER, provider TEXT, model TEXT,
     token_count INTEGER, source_ids TEXT /*JSON array of SourceId*/, success INTEGER /*bool*/)`.
-  - `cloud_consent (provider TEXT PRIMARY KEY, granted_at INTEGER)`, plus an `egress_mode` row in a tiny
-    `app_settings (key TEXT PRIMARY KEY, value TEXT)` kv (so `Mode` persists; default absent ⇒ `LocalOnly`).
+  - `cloud_consent (provider TEXT PRIMARY KEY, granted_at INTEGER)`.
   `SqliteEgressLog` (`record` serializes `source_ids` to JSON) and `SqliteEgressSettings`
-  (`mode`/`consented`/`set_mode`/`grant`/`revoke`) implement the ports. `source_ids` as JSON TEXT is
+  (`consented`/`grant`/`revoke`) implement the ports. `source_ids` as JSON TEXT is
   `json_each`-queryable for the Slice-2 `qa-report`.
 
 - **D6 — Metadata-only logging; no content, no secrets.** The log stores `SourceId`s, a token count, a
@@ -112,8 +110,8 @@ enforced privacy floor instead of reinventing one.
 ```
 AssembledContext { items, total_tokens, budget, egress: EgressDecision }   [raki-memory]
   → GatedLlmProvider.complete_gated(&ctx.egress, req)                       [raki-ai]
-        policy ← settings.mode() + settings.consented()      (live, per call)
-        approve(egress, policy)?  ── Denied → EgressError (no send, no log)
+        locality ← inner.locality(); consented ← settings.consented()      (live, per call)
+        approve(egress, locality, &consented)?  ── Denied → EgressError (no send, no log)
         result ← inner.complete(req)
         log.record(EgressRecord{ id, decision, completed_at, success: result.is_ok() })
         → result
@@ -124,14 +122,14 @@ In this slice `inner` is a `FakeLlmProvider` and the loop is driven by tests.
 ## Components touched
 
 - `crates/raki-domain/src/egress.rs` — CREATE: `SourceId`, `EgressDecision` (+ `summary()`),
-  `EgressLogId`, `EgressRecord`, `Mode`, `EgressError`/`EgressDenied`, `EgressLog`, `EgressSettings`.
+  `EgressLogId`, `EgressRecord`, `EgressError`/`EgressDenied`, `EgressLog`, `EgressSettings`.
   `lib.rs` re-exports.
 - `crates/raki-memory/src/context.rs` — MODIFY: `egress` field on `AssembledContext`; `egress_of(...)`.
-- `crates/raki-ai/src/egress.rs` — CREATE: `EgressPolicy`, private `approve()`, `GatedLlmProvider`.
+- `crates/raki-ai/src/egress.rs` — CREATE: private `approve()` (locality-aware), `GatedLlmProvider`.
 - `crates/raki-ai/src/lib.rs` — MODIFY: `pub mod egress;`; a `FakeLlmProvider` + spy `EgressLog`/
   `EgressSettings` test utilities (the `FakeReranker` pattern).
 - `crates/raki-storage/src/migrations.rs` — MODIFY: migration **V4** (`egress_log`, `cloud_consent`,
-  `app_settings`).
+  `app_settings` kv for future app settings).
 - `crates/raki-storage/src/egress.rs` — CREATE: `SqliteEgressLog`, `SqliteEgressSettings`.
 - `crates/raki-storage/src/lib.rs` — MODIFY: re-export the two stores.
 
@@ -141,15 +139,16 @@ No `src-tauri/src` (app) or `src/` (frontend) changes.
 
 - **`raki-memory`:** `egress_of` yields `source_ids`/`total_tokens` exactly matching the included items;
   assembly still budgets correctly.
-- **`raki-ai` policy (pure):** empty egress ⇒ `EmptyContext`; `LocalOnly` ⇒ `LocalOnlyMode`;
-  `CloudAllowed` + unconsented ⇒ `ConsentRequired`; consented ⇒ `Ok`.
+- **`raki-ai` policy (pure):** empty egress ⇒ `EmptyContext`; `Locality::Local` ⇒ always `Ok` (no
+  egress, no log); `Locality::Cloud` + unconsented ⇒ `ConsentRequired`; consented ⇒ `Ok`.
 - **`raki-ai` gate (fakes) — the test that proves the gate is real:** with a spy `EgressLog` and a
-  `FakeLlmProvider`: (a) `LocalOnly` ⇒ `EgressError`, fake's `complete` **never called**, **zero** log
-  rows; (b) after `grant`, consent is read **live** (no reconstruction) ⇒ inner called once, **one**
-  `EgressRecord` with `success:true`; (c) inner returns `Err` ⇒ still one record, `success:false`,
-  error propagated; (d) empty egress ⇒ `EmptyContext`, no call, no row.
+  fake `LlmProvider`: (a) `Locality::Local` provider ⇒ inner called, **zero** log rows; (b)
+  `Locality::Cloud` provider without consent ⇒ `EgressError`, inner **never called**, zero rows; (c)
+  after `grant`, consent is read **live** (no reconstruction) ⇒ inner called once, **one**
+  `EgressRecord` with `success:true`; (d) inner returns `Err` ⇒ still one record, `success:false`,
+  error propagated; (e) empty egress ⇒ `EmptyContext`, no call, no row.
 - **`raki-storage`:** V4 applies on a populated fixture; `record` then read-back round-trips
-  `source_ids` JSON; `set_mode`/`grant`/`consented`/`revoke` reflect correctly.
+  `source_ids` JSON; `grant`/`consented`/`revoke` reflect correctly.
 - **Workspace:** `cargo test --workspace --exclude raki` / `cargo fmt --check` / `cargo clippy
   --workspace --exclude raki --all-targets -- -D warnings` green; migration tested on a populated
   fixture (AGENTS.md DoD). Frontend untouched.

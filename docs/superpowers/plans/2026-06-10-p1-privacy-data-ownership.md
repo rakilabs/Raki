@@ -38,8 +38,7 @@ Expose the already-built substrate (soft-delete, egress log, consent management)
 - `src-tauri/src/lib.rs` — register commands
 
 **Details:**
-- `get_egress_settings() -> Result<EgressSettingsDto, AppError>` — reads mode + consented providers
-- `set_egress_mode(mode: String) -> Result<(), AppError>` — `"local_only"` or `"cloud_allowed"`
+- `get_egress_settings() -> Result<EgressSettingsDto, AppError>` — reads consented providers
 - `grant_provider_consent(provider: String) -> Result<(), AppError>` — thin wrapper
 - `revoke_provider_consent(provider: String) -> Result<(), AppError>` — thin wrapper
 - `list_egress_log(limit: usize) -> Result<Vec<EgressLogEntryDto>, AppError>` — recent log entries newest-first
@@ -68,7 +67,6 @@ Expose the already-built substrate (soft-delete, egress log, consent management)
 - `src/app/App.tsx` — add Settings toggle button
 
 **Details:**
-- Egress mode toggle: "Local only" / "Cloud allowed" (radio or select)
 - Provider consent list: show consented providers + grant/revoke per provider
 - Audit log: simple scrollable list of recent egress entries (provider, model, token count, timestamp, success)
 - Triggered by a "Settings" button in the app shell (next to AskBox or in a corner)
@@ -91,4 +89,4 @@ Expose the already-built substrate (soft-delete, egress log, consent management)
 - [ ] `cargo clippy --workspace --exclude raki --all-targets -- -D warnings` green
 - [ ] `cargo fmt --check` green
 - [ ] Frontend `tsc --noEmit` green
-- [ ] Manual walkthrough: create note → delete note → see in trash → restore note → change egress mode → grant/revoke consent → view audit log
+- [ ] Manual walkthrough: create note → delete note → see in trash → restore note → grant/revoke consent → view audit log

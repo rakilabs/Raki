@@ -54,7 +54,7 @@ pub struct GenerateDeps<'a> {
 }
 
 pub enum GenerateError {                        // C2 — non-egress failures stay distinguishable
-    Egress(EgressError),                        // includes Denied(LocalOnlyMode|ConsentRequired)
+    Egress(EgressError),                        // includes Denied(ConsentRequired)
     Domain(DomainError),                        // retrieval/storage/provider failure
 }
 
@@ -110,16 +110,16 @@ pub enum AnswerOutcome {
 }
 ```
 - Builds `GenerateDeps` from app state (existing indexes/repo/clock + a `GatedLlmProvider` wrapping `MessagesProvider`), calls `raki-generate`.
-- On `GenerateError::Egress(Denied(LocalOnlyMode | ConsentRequired))`: re-runs **retrieve+assemble locally** (pure, no send) to build the preview → `NeedsConsent { summary: ctx.egress.summary(), source_titles, provider }`. **The command never mutates consent** (M3).
+- On `GenerateError::Egress(Denied(ConsentRequired))`: re-runs **retrieve+assemble locally** (pure, no send) to build the preview → `NeedsConsent { summary: ctx.egress.summary(), source_titles, provider }`. **The command never mutates consent** (M3).
 - On `Ok(Answer)`: `Answer { state, text, cited }`.
 - On `GenerateError::Domain(_)`: surfaced as `AppError` (the existing command error type), distinct from the consent path.
 - This is the CI-blind surface; verified **manually** in `tauri dev`, never claimed from a test run.
 
 ### D7 — Consent flow + commands — Slice 2b
-Consent mutation lives in its **own** command (M3, Slice 1 line 183): `grant_cloud_consent(provider)` → `EgressSettings::grant(provider)` + `set_mode(CloudAllowed)`; and `revoke_cloud_consent(provider)` for symmetry.
+Consent mutation lives in its **own** command (M3): `grant_cloud_consent(provider)` → `EgressSettings::grant(provider)`; and `revoke_cloud_consent(provider)` for symmetry.
 
-UX, default mode `LocalOnly`, **behind an opt-in** "Enable experimental retrieval diagnostics" setting (M5, Slice 1 line 184 — the ask-box is **not** in the default `NotesView`; it appears only when the user has enabled the experimental setting):
-1. Ask in local-only → backend returns `NeedsConsent` with the egress preview (`summary` + source titles). **Nothing has left the device.**
+UX, **behind an opt-in** "Enable experimental retrieval diagnostics" setting (M5 — the ask-box is **not** in the default `NotesView`; it appears only when the user has enabled the experimental setting):
+1. Ask without provider consent → backend returns `NeedsConsent` with the egress preview (`summary` + source titles). **Nothing has left the device.**
 2. UI shows preview + "Send to cloud" (and "stay local"). Confirm → calls `grant_cloud_consent(provider)`, **then re-submits** the same query → the gate now approves → answer renders with cited source notes inline. Backend stays stateless (no pending-request cache).
 
 ### D8 — The gate stays the only send path
@@ -130,7 +130,7 @@ UX, default mode `LocalOnly`, **behind an opt-in** "Enable experimental retrieva
 ## Sub-slice split (two implementation plans)
 
 - **Slice 2a — library core (fully CI-tested):** D1 (`CompletionRequest` fields), D2 (`MessagesProvider` + protocol/timeout unit tests), D3 (`raki-generate` flow with fakes, `NothingMatched` short-circuit), D4 (`AnswerState` verdict + tolerant JSON parse), D5 (V5 column, `complete_gated` returns id, `set_grounded`). **DoD:** `cargo test --workspace --exclude raki` green, with `FakeLlmProvider`-driven cases for every `AnswerState` branch (Grounded / NotAnswerable / Ungrounded-0-cite / Ungrounded-bad-cite / ParseFailed) + `NothingMatched`, plus a spy asserting `set_grounded` gets the right bit.
-- **Slice 2b — app shell (manually verified):** D6 (`answer_question` command + `AnswerOutcome`), D7 (`grant_cloud_consent`/`revoke_cloud_consent` + ask-box behind the opt-in). **DoD:** manual `tauri dev` walkthrough — enable the experimental setting → ask in local-only → see egress preview → confirm → grounded answer with cited notes; revoke → back to preview. No completion claim without that manual confirmation.
+- **Slice 2b — app shell (manually verified):** D6 (`answer_question` command + `AnswerOutcome`), D7 (`grant_cloud_consent`/`revoke_cloud_consent` + ask-box behind the opt-in). **DoD:** manual `tauri dev` walkthrough — enable the experimental setting → ask without provider consent → see egress preview → confirm → grounded answer with cited notes; revoke → back to preview. No completion claim without that manual confirmation.
 
 Build 2a first; it is provable on its own and leaves the app untouched.
 
@@ -145,11 +145,11 @@ Build 2a first; it is provable on its own and leaves the app untouched.
 ## Limitations (acknowledged, not gaps)
 - **Online groundedness is a proxy**, not claim-level faithfulness. Mitigation: offline LLM-judge calibration on a sample of logged ⟨query, context, answer⟩ triples during the D8 eval cadence — no extra live egress. (The judge runner is out of scope here.)
 - **`insufficient_context` is a single boolean (M11):** an over-conservative model that marks `NotAnswerable` when the answer *is* in context would inflate the graduation bar (a false retrieval alarm). Accepted for v1; the offline judge calibration is precisely what detects this skew. Splitting "notes-silent" vs "model-unsure" is deferred (YAGNI for one telemetry bit).
-- **Retrieval is assumed local (M4):** the only `EmbeddingProvider` is `FastEmbedProvider` (on-device); the "local-only re-run" preview makes no network call. If a cloud embedder is ever added, the preview path would itself egress and must be revisited.
+- **Retrieval is assumed local (M4):** the only `EmbeddingProvider` is `FastEmbedProvider` (on-device); the consent preview makes no network call. If a cloud embedder is ever added, the preview path would itself egress and must be revisited.
 - **Coarse consent** — per-provider, not per-note or per-question (after the first).
 - **Gate enforcement is by convention** (re-export discipline + AGENTS.md), not the type system; `LlmProvider::complete` is public in the domain.
 - **Metadata-only logging unchanged** — `egress_log` stores no note text or keys; `grounded` is a single derived bit.
 - **No streaming, multi-turn, history, retrieval auto-tuning, `qa-report`, or bar read-side UI** in this slice.
 
 ## Out of scope
-Streaming responses, conversation history/multi-turn, the offline judge runner, the `qa-report` summarizer + graduation-bar dashboard, per-note consent, automatic retrieval tuning, richer backoff policies. **Local-model QA** (Slice 1 line 186's "named weakest local-model target") is deferred — this slice is cloud-first (Kimi); a local generate path is a separate future slice, and the gate already treats local-only as the safe default.
+Streaming responses, conversation history/multi-turn, the offline judge runner, the `qa-report` summarizer + graduation-bar dashboard, per-note consent, automatic retrieval tuning, richer backoff policies. **Local-model QA** (Slice 1 line 186's "named weakest local-model target") is deferred — this slice is cloud-first (Kimi); a local generate path is a separate future slice, and the gate already treats local providers as the safe default (no consent, no log).

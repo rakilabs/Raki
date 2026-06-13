@@ -50,7 +50,7 @@ export function AskBox() {
 
   const confirmSend = () =>
     run(async () => {
-      await qaApi.grant(PROVIDER); // grant consent + flip to CloudAllowed, then re-ask
+      await qaApi.grant(PROVIDER); // grant provider consent, then re-ask
       return qaApi.ask(question().trim());
     });
 

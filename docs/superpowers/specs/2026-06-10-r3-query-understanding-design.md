@@ -201,10 +201,10 @@ pub async fn hybrid_search(
 
 - `AppState` gains `rewriter: Option<Arc<dyn QueryRewriter>>`.
 - `GenerateDeps` gains `rewriter: Option<&'a dyn QueryRewriter>`.
-- **Config:** `query_rewrite_enabled: bool` (default `false`). Only construct `CloudQueryRewriter` when `true` AND not local-only AND provider is consented.
+- **Config:** `query_rewrite_enabled: bool` (default `false`). Only construct `CloudQueryRewriter` when `true` AND the provider is consented.
 - **Ask** (`answer_question`): when enabled, passes `Some(state.rewriter.as_ref())` via `GenerateDeps`.
 - **Search** (`search_notes`): passes `None`.
-- **Local-only mode:** `rewriter = None`.
+- **No cloud consent:** `rewriter = None`.
 
 ### 3.5 Frontend
 
@@ -248,7 +248,7 @@ User: "what did I spend in Kyoto vs Osaka?"
 | Failure | Behavior | User-visible |
 |---|---|---|
 | Feature flag off | `rewriter = None` | None — raw query |
-| Local-only mode | `rewriter = None` | None — raw query |
+| No cloud consent | `rewriter = None` | None — raw query |
 | Consent denied | `pass_through(raw)` | None — raw query |
 | Timeout (>3s) | `pass_through(raw)` | None — raw query |
 | Network error | `pass_through(raw)` | None — raw query |
@@ -342,5 +342,5 @@ R3 is **done** when:
 - **Multi-hop execution:** Actually run `sub_queries` independently and union results.
 - **Answer formatting:** Add `intent` classification when response templates are in scope.
 - **Entity extraction:** Add `entities` field when entity-aware retrieval is scheduled.
-- **Local LLM:** Add `LocalQueryRewriter` using Ollama/llama.cpp for local-only mode.
+- **Local LLM:** Add `LocalQueryRewriter` using Ollama/llama.cpp for local providers.
 - **Search wiring:** Opt-in setting to enable query rewriting for Search (with debounce).
