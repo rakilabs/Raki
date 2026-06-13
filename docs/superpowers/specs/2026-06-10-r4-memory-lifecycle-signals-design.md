@@ -1,6 +1,6 @@
 # R4 — Memory Lifecycle Signals Design
 
-> **Status:** Draft — revised after spec review, awaiting implementation plan  
+> **Status:** Implemented — R4.1 code, corpus, harness, and ADR-0009 are complete; production attach is blocked on real-model evaluation per ADR-0009.  
 > **Date:** 2026-06-10  
 > **Depends on:** ADR-0005, ADR-0006, ADR-0007, R0–R3 complete  
 > **Roadmap:** Track A — R4.1 + R4-corpus + R4.2  

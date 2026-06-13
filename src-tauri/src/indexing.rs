@@ -72,7 +72,7 @@ mod tests {
     use raki_storage::{Database, SqliteIndexingStore, SqliteNoteRepository, SqliteVectorIndex};
 
     async fn vector_count(db: &Database) -> i64 {
-        db.call(|c| c.query_row("SELECT count(*) FROM note_vectors", [], |r| r.get(0)))
+        db.call(|c| c.query_row("SELECT count(*) FROM chunk_vectors", [], |r| r.get(0)))
             .await
             .unwrap()
     }
