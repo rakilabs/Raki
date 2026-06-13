@@ -19,4 +19,5 @@ export const notesApi = {
   delete: (id: string) => commands.deleteNote(id),
   restore: (id: string) => commands.restoreNote(id),
   listTrashed: () => commands.listTrashedNotes(),
+  recordView: (id: string) => commands.recordNoteView({ note_id: id }),
 };

@@ -27,7 +27,7 @@ use raki_storage::{
 
 use crate::commands::notes::{
     create_note, delete_note, get_note, list_notes, list_trashed_notes, restore_note, search_notes,
-    update_note,
+    search_notes_with_signals, update_note,
 };
 use crate::commands::qa::answer_question;
 use crate::commands::settings::{
@@ -212,6 +212,7 @@ pub fn run() {
             list_notes,
             get_note,
             search_notes,
+            search_notes_with_signals,
             update_note,
             delete_note,
             restore_note,

@@ -199,6 +199,40 @@ pub async fn search_notes(
     Ok(notes.into_iter().map(NoteDto::from).collect())
 }
 
+/// **Experimental** signal-boosted search.
+///
+/// This is *not* the production search path. It exists only to let you test the
+/// R4 memory-lifecycle mixer (`recency`, `pin`, `salience`) against real notes
+/// without changing `search_notes`. Use it from the dev-tools console, not from
+/// shipped UI components.
+#[tauri::command]
+pub async fn search_notes_with_signals(
+    state: State<'_, AppState>,
+    query: String,
+) -> Result<Vec<NoteDto>, AppError> {
+    const SIGNAL_K: usize = 20;
+    let ids = raki_retrieval::hybrid_search_with_signals(
+        state.keyword.as_ref(),
+        state.vectors.as_ref(),
+        state.embedder.as_ref(),
+        None::<&dyn raki_domain::QueryRewriter>,
+        state.signal_source.as_ref(),
+        state.signal_booster.as_ref(),
+        &query,
+        SIGNAL_K,
+        state.clock.now_ms(),
+    )
+    .await?;
+
+    let mut notes = Vec::with_capacity(ids.len());
+    for id in ids {
+        if let Some(note) = state.notes.get(&id).await? {
+            notes.push(note);
+        }
+    }
+    Ok(notes.into_iter().map(NoteDto::from).collect())
+}
+
 #[tauri::command]
 pub async fn update_note(
     state: State<'_, AppState>,

@@ -101,7 +101,12 @@ impl SignalStore for SqliteSignalStore {
                     "INSERT INTO note_signals (id, note_id, view_count, last_accessed_at, created_at, updated_at, version)
                      VALUES (lower(hex(randomblob(16))), ?1, 1, ?2, ?2, ?2, 1)
                      ON CONFLICT(note_id) DO UPDATE SET
-                        view_count = view_count + 1,
+                        view_count = CASE
+                            WHEN note_signals.last_accessed_at IS NULL
+                              OR excluded.last_accessed_at - note_signals.last_accessed_at > 60000
+                            THEN note_signals.view_count + 1
+                            ELSE note_signals.view_count
+                        END,
                         last_accessed_at = excluded.last_accessed_at,
                         updated_at = excluded.updated_at,
                         version = version + 1",
@@ -170,13 +175,39 @@ mod tests {
         let id = NoteId::new();
         notes.upsert(&sample(id, "T")).await.unwrap();
 
-        store.record_view(&id, 5000).await.unwrap();
-        store.record_view(&id, 6000).await.unwrap();
+        // More than 60 seconds apart so both calls increment the counter.
+        store.record_view(&id, 0).await.unwrap();
+        store.record_view(&id, 61_000).await.unwrap();
 
         let signals = source.get(&[id]).await.unwrap();
         let s = signals.get(&id).unwrap();
         assert_eq!(s.view_count, 2);
-        assert_eq!(s.last_accessed_at_ms, Some(6000));
+        assert_eq!(s.last_accessed_at_ms, Some(61_000));
+    }
+
+    #[tokio::test]
+    async fn record_view_rate_limits_within_one_minute() {
+        let db = Database::open_in_memory().unwrap();
+        let notes = SqliteNoteRepository::new(db.clone());
+        let store = SqliteSignalStore::new(db.clone());
+        let source = SqliteSignalSource::new(db.clone());
+        let id = NoteId::new();
+        notes.upsert(&sample(id, "T")).await.unwrap();
+
+        store.record_view(&id, 0).await.unwrap();
+        store.record_view(&id, 30_000).await.unwrap();
+        store.record_view(&id, 60_000).await.unwrap();
+
+        let s = source.get(&[id]).await.unwrap().remove(&id).unwrap();
+        assert_eq!(
+            s.view_count, 1,
+            "only the first view within one minute counts"
+        );
+        assert_eq!(
+            s.last_accessed_at_ms,
+            Some(60_000),
+            "last_accessed_at still updates"
+        );
     }
 
     #[tokio::test]
@@ -262,11 +293,12 @@ mod tests {
         let id = NoteId::new();
         notes.upsert(&sample(id, "T")).await.unwrap();
 
-        store.record_view(&id, 7000).await.unwrap();
-        store.record_view(&id, 8000).await.unwrap();
+        // Spaced apart so both calls increment despite the one-minute rate limit.
+        store.record_view(&id, 0).await.unwrap();
+        store.record_view(&id, 61_000).await.unwrap();
 
         let s = source.get(&[id]).await.unwrap().remove(&id).unwrap();
         assert_eq!(s.view_count, 2);
-        assert_eq!(s.last_accessed_at_ms, Some(8000));
+        assert_eq!(s.last_accessed_at_ms, Some(61_000));
     }
 }

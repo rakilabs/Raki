@@ -4,7 +4,7 @@ import {
   useQueryClient,
 } from "@tanstack/solid-query";
 import { Save, Trash2 } from "lucide-solid";
-import { createEffect, createSignal, Show } from "solid-js";
+import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import { notesApi, notesKeys } from "~/modules/notes/api";
 import {
   Button,
@@ -21,11 +21,33 @@ interface NoteEditorProps {
   onDeleted: () => void;
 }
 
+// Per-note debounce: don't record another view within 5 s of the previous one.
+const lastRecordedView = new Map<string, number>();
+
 export function NoteEditor(props: NoteEditorProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [title, setTitle] = createSignal("");
   const [body, setBody] = createSignal("");
+
+  // Record a view after the note has been active for 2 s. The backend rate-limits
+  // to one increment per note per minute; the frontend avoids spamming calls.
+  createEffect(() => {
+    const noteId = props.noteId;
+    const now = Date.now();
+    if (now - (lastRecordedView.get(noteId) ?? 0) < 5000) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      notesApi.recordView(noteId).catch(() => {
+        // View counting is best-effort; don't disturb the editor on failure.
+      });
+      lastRecordedView.set(noteId, Date.now());
+    }, 2000);
+
+    onCleanup(() => clearTimeout(timer));
+  });
 
   const note = createQuery(() => ({
     queryKey: ["note", props.noteId],
