@@ -116,10 +116,17 @@ pending a real embedding-model evaluation on this corpus (ADR-0009).
 Spec: `docs/superpowers/specs/2026-06-10-r4-memory-lifecycle-signals-design.md`.
 Plan: `docs/superpowers/plans/2026-06-12-r4-memory-lifecycle-signals.md`.
 
-### 🔒 R4 — Memory lifecycle — production attach blocked on real-model evaluation
+### ✅ R4 — Memory lifecycle — kill-switch invoked
 **Goal:** grow `raki-memory` beyond context assembly — recency / salience / pinning signals feeding
-ranking ("a second brain knows time, links, tags"). Today the crate is context-assembly only.
+ranking ("a second brain knows time, links, tags").
 **Exit:** measured contribution to ranking; not a guess.
+**Status:** **Done.** Real-model evaluation (`fastembed` / `bge-small-en-v1.5`) showed no measurable
+Success@3 lift on the R4 seed corpus (whole-note 26/26 baseline, chunked 25/26 baseline; signals 0 lift).
+Per ADR-0009 the kill-switch was invoked: the signal-boosted search path is **not attached** to
+production `search_notes`, and the experimental `search_notes_with_signals` command was removed.
+The signal infrastructure (ports, storage, `record_note_view`, `touch` on update) remains in place for
+future re-testing.
+**Decision recorded in:** ADR-0009.
 
 ---
 

@@ -30,8 +30,7 @@ export const commands = {
     invoke<null>("record_note_view", { input }),
   getNote: (id: string) => invoke<NoteDto | null>("get_note", { id }),
   searchNotes: (query: string) => invoke<NoteDto[]>("search_notes", { query }),
-  searchNotesWithSignals: (query: string) =>
-    invoke<NoteDto[]>("search_notes_with_signals", { query }),
+
   updateNote: (input: UpdateNoteInput) =>
     invoke<NoteDto>("update_note", { input }),
   deleteNote: (id: string) => invoke<null>("delete_note", { id }),
