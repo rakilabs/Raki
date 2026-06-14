@@ -250,8 +250,8 @@ impl AnswerState {
     }
 }
 
-/// The result of a successful gated answer request.
-#[derive(Debug)]
+/// The result of a gated answer request.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Answer {
     pub state: AnswerState,
     pub text: String,
@@ -260,6 +260,7 @@ pub struct Answer {
 }
 
 /// What a cloud send WOULD disclose — metadata only.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EgressPreview {
     pub provider: String,
     pub summary: String,
