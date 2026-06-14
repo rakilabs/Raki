@@ -1,37 +1,10 @@
-//! The deterministic groundedness verdict. No model call: parse-or-fail-closed, then classify
-//! against the context's source ids. See spec D4.
+//! The deterministic groundedness verdict. No model call: parse-or-fail-closed,
+//! then classify against the context's source ids.
 
 use std::collections::HashSet;
 
-use raki_domain::SourceId;
+use crate::{AnswerState, SourceId};
 use serde::Deserialize;
-
-/// The answer's relationship to the retrieved context. Richer than a bool so the UI and a future
-/// `qa-report` can distinguish the failure modes (spec D4 / Slice 1 line 185).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AnswerState {
-    NothingMatched,
-    NotAnswerable,
-    ParseFailed,
-    Ungrounded,
-    Grounded,
-}
-
-impl AnswerState {
-    pub fn name(&self) -> &'static str {
-        match self {
-            AnswerState::NothingMatched => "nothing_matched",
-            AnswerState::NotAnswerable => "not_answerable",
-            AnswerState::ParseFailed => "parse_failed",
-            AnswerState::Ungrounded => "ungrounded",
-            AnswerState::Grounded => "grounded",
-        }
-    }
-    /// The persisted bit (spec D5): only `Grounded` is true.
-    pub fn is_grounded(&self) -> bool {
-        matches!(self, AnswerState::Grounded)
-    }
-}
 
 #[derive(Deserialize)]
 struct ModelReply {
@@ -118,7 +91,10 @@ fn first_parseable(raw: &str) -> Option<ModelReply> {
 }
 
 /// Classify a raw model reply against the context ids. Returns (state, answer_text, cited).
-pub fn evaluate(raw: &str, context_ids: &HashSet<String>) -> (AnswerState, String, Vec<SourceId>) {
+pub fn evaluate(
+    raw: &str,
+    context_ids: &HashSet<SourceId>,
+) -> (AnswerState, String, Vec<SourceId>) {
     let Some(reply) = first_parseable(raw) else {
         return (AnswerState::ParseFailed, raw.to_string(), vec![]);
     };
@@ -127,29 +103,28 @@ pub fn evaluate(raw: &str, context_ids: &HashSet<String>) -> (AnswerState, Strin
     }
     // Dedup citations (m3), preserving order.
     let mut seen = HashSet::new();
-    let cites: Vec<String> = reply
+    let cites: Vec<SourceId> = reply
         .cited_source_ids
         .unwrap_or_default()
         .into_iter()
+        .map(SourceId)
         .filter(|c| seen.insert(c.clone()))
         .collect();
     if cites.is_empty() {
         return (AnswerState::Ungrounded, reply.answer, vec![]); // review #2/M10: no provenance
     }
     if cites.iter().any(|c| !context_ids.contains(c)) {
-        let ids = cites.into_iter().map(SourceId).collect();
-        return (AnswerState::Ungrounded, reply.answer, ids); // fabricated citation
+        return (AnswerState::Ungrounded, reply.answer, cites); // fabricated citation
     }
-    let ids = cites.into_iter().map(SourceId).collect();
-    (AnswerState::Grounded, reply.answer, ids)
+    (AnswerState::Grounded, reply.answer, cites)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn ctx(ids: &[&str]) -> HashSet<String> {
-        ids.iter().map(|s| s.to_string()).collect()
+    fn ctx(ids: &[&str]) -> HashSet<SourceId> {
+        ids.iter().map(|s| SourceId(s.to_string())).collect()
     }
 
     #[test]

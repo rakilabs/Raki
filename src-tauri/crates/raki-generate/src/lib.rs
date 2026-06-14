@@ -1,9 +1,7 @@
 //! Grounded QA orchestration: retrieve → assemble → gate → answer → verify. Composes the leaf
 //! crates (the dependency rule forbids a leaf from doing this — see spec "Crate placement").
 
-mod groundedness;
-
-pub use groundedness::AnswerState;
+pub use raki_domain::{evaluate, Answer, AnswerState, EgressPreview};
 
 use raki_domain::{
     body_to_text, DomainError, EgressError, EmbeddingProvider, GatedLlmProvider, KeywordIndex,
@@ -24,15 +22,6 @@ pub struct GenerateDeps<'a> {
     pub rewriter: Option<&'a dyn raki_domain::QueryRewriter>,
 }
 
-/// The result of a QA request.
-#[derive(Debug)]
-pub struct Answer {
-    pub state: AnswerState,
-    pub text: String,
-    pub cited_ids: Vec<SourceId>,
-    pub egress_log_id: Option<raki_domain::EgressLogId>,
-}
-
 /// Non-egress vs egress failures stay distinguishable (spec C2).
 #[derive(Debug)]
 pub enum GenerateError {
@@ -43,8 +32,6 @@ pub enum GenerateError {
 use raki_domain::CompletionRequest;
 use raki_memory::{assemble_context, AssembledContext, Candidate};
 use raki_retrieval::hybrid_search;
-
-use groundedness::evaluate;
 
 /// System prompt: bind the model to the numbered context and the JSON reply contract (spec D4).
 fn build_system_prompt(ctx: &AssembledContext) -> String {
@@ -112,8 +99,8 @@ pub async fn send_answer(
         .complete_gated(&ctx.egress, req)
         .await
         .map_err(GenerateError::Egress)?;
-    let context_ids: std::collections::HashSet<String> =
-        ctx.egress.source_ids.iter().map(|s| s.0.clone()).collect();
+    let context_ids: std::collections::HashSet<SourceId> =
+        ctx.egress.source_ids.iter().cloned().collect();
     let (state, text, cited_ids) = evaluate(&completion.text, &context_ids);
     if let Some(id) = log_id {
         deps.gate
@@ -144,13 +131,6 @@ pub async fn answer_question(
     send_answer(&ctx, query, deps).await
 }
 
-/// What a cloud send WOULD disclose — shown to the user before consent (spec D7). Metadata only.
-pub struct EgressPreview {
-    pub provider: String,
-    pub summary: String,
-    pub source_titles: Vec<String>,
-}
-
 /// The egress preview for `query` (no send), or `None` if nothing matched.
 pub async fn preview(
     query: &str,
@@ -167,7 +147,6 @@ pub async fn preview(
         .collect();
     Ok(Some(EgressPreview {
         provider: deps.provider.to_string(),
-        summary: ctx.egress.summary(),
         source_titles,
     }))
 }
@@ -457,7 +436,6 @@ mod flow_tests {
             .expect("some preview");
         assert_eq!(p.provider, "kimi");
         assert_eq!(p.source_titles, vec!["Trip".to_string()]);
-        assert!(p.summary.contains("→ kimi/k2"));
         assert_eq!(fake.call_count(), 0, "preview never sends");
     }
 
