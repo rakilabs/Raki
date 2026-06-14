@@ -10,7 +10,10 @@ use raki_domain::Note;
 pub struct NoteDto {
     pub id: String,
     pub title: String,
+    /// Canonical ProseMirror-JSON body.
     pub body: String,
+    /// Plain-text projection of `body` for snippets and display.
+    pub body_text: String,
     // i64 epoch-ms: serde_json sends these as JSON numbers over IPC, so the TS
     // contract must be `number`, not ts-rs's default `bigint`.
     #[ts(type = "number")]
@@ -26,7 +29,8 @@ impl From<Note> for NoteDto {
         NoteDto {
             id: n.id.to_string(),
             title: n.title,
-            body: raki_domain::body_to_text(&n.body),
+            body_text: raki_domain::body_to_text(&n.body),
+            body: n.body,
             created_at: n.created_at,
             updated_at: n.updated_at,
             deleted_at: n.deleted_at,

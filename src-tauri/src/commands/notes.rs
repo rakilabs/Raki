@@ -2,7 +2,7 @@
 
 use tauri::State;
 
-use raki_domain::{text_to_body, DomainError, Note, NoteId};
+use raki_domain::{DomainError, Note, NoteId};
 
 use crate::dto::{CreateNoteInput, ExportNotesForEvalResult, NoteDto, UpdateNoteInput};
 use crate::error::AppError;
@@ -132,8 +132,9 @@ async fn search_reranked(
 }
 
 /// Boundary validation shared by create + update (review M1). Returns the trimmed title
-/// so callers share a single source of truth for sanitization.
-fn validate(title: &str, body: &str) -> Result<String, AppError> {
+/// and normalized ProseMirror-JSON body so callers share a single source of truth for
+/// sanitization.
+fn validate(title: &str, body: &str) -> Result<(String, String), AppError> {
     let t = title.trim();
     if t.is_empty() {
         return Err(AppError {
@@ -153,7 +154,12 @@ fn validate(title: &str, body: &str) -> Result<String, AppError> {
             message: "body too long".into(),
         });
     }
-    Ok(t.to_string())
+    // Body must be valid ProseMirror doc JSON.
+    let normalized = raki_domain::normalize_body(body).map_err(|e| AppError {
+        kind: "validation_error".into(),
+        message: format!("invalid note body: {e}"),
+    })?;
+    Ok((t.to_string(), normalized))
 }
 
 #[tauri::command]
@@ -161,8 +167,8 @@ pub async fn create_note(
     state: State<'_, AppState>,
     input: CreateNoteInput,
 ) -> Result<NoteDto, AppError> {
-    let title = validate(&input.title, &input.body)?;
-    let note = Note::new(title, text_to_body(&input.body), state.clock.now_ms());
+    let (title, body) = validate(&input.title, &input.body)?;
+    let note = Note::new(title, body, state.clock.now_ms());
     state.notes.upsert(&note).await?;
     state.index.trigger(); // embed the new note in the background (single-flight)
     Ok(NoteDto::from(note))
@@ -204,13 +210,13 @@ pub async fn update_note(
     state: State<'_, AppState>,
     input: UpdateNoteInput,
 ) -> Result<NoteDto, AppError> {
-    let title = validate(&input.title, &input.body)?;
+    let (title, body) = validate(&input.title, &input.body)?;
     let nid = NoteId::parse(&input.id)?;
     let existing = state.notes.get(&nid).await?.ok_or_else(|| AppError {
         kind: "not_found".into(),
         message: "note not found".into(),
     })?;
-    let edited = existing.edit(title, text_to_body(&input.body), state.clock.now_ms());
+    let edited = existing.edit(title, body, state.clock.now_ms());
     // Atomic guarded update: false ⇒ the row was deleted between read and write — do not resurrect.
     if !state.notes.update(&edited).await? {
         return Err(AppError {
@@ -333,6 +339,7 @@ pub async fn export_notes_for_eval(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use raki_domain::text_to_body;
 
     #[test]
     fn cap_text_passes_short_strings_through() {
@@ -598,5 +605,25 @@ mod tests {
             out.len()
         );
         assert!(!out.is_empty());
+    }
+
+    #[test]
+    fn validate_accepts_valid_prosemirror_json() {
+        let body = r#"{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hi"}]}]}"#;
+        let (title, out) = validate("T", body).unwrap();
+        assert_eq!(title, "T");
+        assert!(out.contains("blockId"));
+    }
+
+    #[test]
+    fn validate_rejects_invalid_json() {
+        let err = validate("T", "not json").unwrap_err();
+        assert_eq!(err.kind, "validation_error");
+    }
+
+    #[test]
+    fn validate_rejects_non_doc_json() {
+        let err = validate("T", r#"{"type":"not-doc"}"#).unwrap_err();
+        assert_eq!(err.kind, "validation_error");
     }
 }
