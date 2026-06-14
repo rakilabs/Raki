@@ -35,7 +35,11 @@
     "marked": "^18.0.5",
     "solid-js": "^1.9.13",
     "solid-sonner": "^0.3.1",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "@tiptap/core": "^2.11.0",
+    "@tiptap/starter-kit": "^2.11.0",
+    "@tiptap/extension-placeholder": "^2.11.0",
+    "uuid": "^11.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",

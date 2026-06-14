@@ -3,7 +3,14 @@
 export type NoteDto = {
   id: string;
   title: string;
+  /**
+   * Canonical ProseMirror-JSON body.
+   */
   body: string;
+  /**
+   * Plain-text projection of `body` for snippets and display.
+   */
+  body_text: string;
   created_at: number;
   updated_at: number;
   deleted_at: number | null;

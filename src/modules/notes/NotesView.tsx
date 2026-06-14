@@ -5,6 +5,7 @@ import {
 } from "@tanstack/solid-query";
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { notesApi, notesKeys } from "./api";
+import { NoteEditor } from "./components/NoteEditor";
 
 export function NotesView() {
   const queryClient = useQueryClient();
@@ -12,8 +13,6 @@ export function NotesView() {
   const [search, setSearch] = createSignal("");
   const [debouncedSearch, setDebouncedSearch] = createSignal("");
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
-  const [editTitle, setEditTitle] = createSignal("");
-  const [editBody, setEditBody] = createSignal("");
   const [showTrash, setShowTrash] = createSignal(false);
   const [exportMessage, setExportMessage] = createSignal<string | null>(null);
 
@@ -45,29 +44,12 @@ export function NotesView() {
     (notes.data ?? []).find((n) => n.id === selectedId())
   );
 
-  createEffect(() => {
-    const id = selectedId();
-    if (id) {
-      const n = (notes.data ?? []).find((n) => n.id === id);
-      if (n) {
-        setEditTitle(n.title);
-        setEditBody(n.body);
-      }
-    }
-  });
-
   const createNote = createMutation(() => ({
     mutationFn: () => notesApi.create({ title: title(), body: "" }),
     onSuccess: () => {
       setTitle("");
       queryClient.invalidateQueries({ queryKey: notesKeys.all });
     },
-  }));
-
-  const saveNote = createMutation(() => ({
-    mutationFn: (vars: { id: string; title: string; body: string }) =>
-      notesApi.update(vars),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: notesKeys.all }),
   }));
 
   const deleteNote = createMutation(() => ({
@@ -192,44 +174,9 @@ export function NotesView() {
         </Show>
 
         <Show when={!showTrash() && selected()}>
-          {(s) => {
-            const n = s();
-            return (
-              <form
-                class="note-editor"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (n && editTitle().trim()) {
-                    saveNote.mutate({
-                      id: n.id,
-                      title: editTitle(),
-                      body: editBody(),
-                    });
-                  }
-                }}
-              >
-                <input
-                  aria-label="Title"
-                  value={editTitle()}
-                  onInput={(e) => setEditTitle(e.currentTarget.value)}
-                />
-                <textarea
-                  aria-label="Body"
-                  value={editBody()}
-                  onInput={(e) => setEditBody(e.currentTarget.value)}
-                />
-                <button
-                  type="submit"
-                  disabled={saveNote.isPending || !editTitle().trim()}
-                >
-                  Save
-                </button>
-                <Show when={saveNote.isError}>
-                  <p role="alert">Save failed — please try again.</p>
-                </Show>
-              </form>
-            );
-          }}
+          {(s) => (
+            <NoteEditor noteId={s().id} onDeleted={() => setSelectedId(null)} />
+          )}
         </Show>
       </div>
     </section>

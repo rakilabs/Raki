@@ -30,6 +30,7 @@ describe("notesApi", () => {
       id: "n1",
       title: "t",
       body: "b",
+      body_text: "b",
       created_at: 0,
       updated_at: 1,
       deleted_at: null,

@@ -12,9 +12,9 @@ import {
   CardContent,
   Input,
   Spinner,
-  Textarea,
   useToast,
 } from "~/shared/ui";
+import { TipTapEditor } from "./TipTapEditor";
 
 interface NoteEditorProps {
   noteId: string;
@@ -28,7 +28,7 @@ export function NoteEditor(props: NoteEditorProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [title, setTitle] = createSignal("");
-  const [body, setBody] = createSignal("");
+  const [bodyJson, setBodyJson] = createSignal("");
 
   // Record a view after the note has been active for 2 s. The backend rate-limits
   // to one increment per note per minute; the frontend avoids spamming calls.
@@ -58,7 +58,7 @@ export function NoteEditor(props: NoteEditorProps) {
     const n = note.data;
     if (n) {
       setTitle(n.title);
-      setBody(n.body);
+      setBodyJson(n.body);
     }
   });
 
@@ -67,7 +67,7 @@ export function NoteEditor(props: NoteEditorProps) {
       notesApi.update({
         id: props.noteId,
         title: title(),
-        body: body(),
+        body: bodyJson(),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: notesKeys.all });
@@ -89,7 +89,7 @@ export function NoteEditor(props: NoteEditorProps) {
   const isDirty = () => {
     const n = note.data;
     if (!n) return false;
-    return n.title !== title() || n.body !== body();
+    return n.title !== title() || n.body !== bodyJson();
   };
 
   return (
@@ -127,10 +127,9 @@ export function NoteEditor(props: NoteEditorProps) {
             </Button>
           </div>
 
-          <Textarea
-            class="flex-1"
-            value={body()}
-            onInput={(e) => setBody(e.currentTarget.value)}
+          <TipTapEditor
+            bodyJson={bodyJson()}
+            onChange={setBodyJson}
             placeholder="Start writing..."
           />
 

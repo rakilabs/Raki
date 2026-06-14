@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,7 +18,16 @@ vi.mock("./api", () => ({
     listTrashed: vi.fn(),
     exportForEval: vi.fn(),
     recordView: vi.fn(),
+    getNote: vi.fn(),
   },
+}));
+
+vi.mock("./components/NoteEditor", () => ({
+  NoteEditor: (props: { noteId: string; onDeleted: () => void }) => (
+    <div data-testid="note-editor" data-note-id={props.noteId}>
+      Note editor for {props.noteId}
+    </div>
+  ),
 }));
 
 import { notesApi } from "./api";
@@ -37,44 +46,26 @@ function renderView() {
   ));
 }
 
-describe("NotesView editor", () => {
+describe("NotesView", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("selecting a note populates the editor and Save delegates to update", async () => {
+  it("selecting a note renders the editor for that note", async () => {
     mocked.list.mockResolvedValue([
       {
         id: "n1",
         title: "Trip",
-        body: "Pay cash",
+        body: "{}",
+        body_text: "Pay cash",
         created_at: 0,
         updated_at: 0,
         deleted_at: null,
       },
     ]);
-    mocked.update.mockResolvedValue({
-      id: "n1",
-      title: "Trip",
-      body: "Pay card",
-      created_at: 0,
-      updated_at: 1,
-      deleted_at: null,
-    });
     renderView();
 
     fireEvent.click(await screen.findByRole("button", { name: "Trip" }));
-    const body = (await screen.findByLabelText("Body")) as HTMLTextAreaElement;
-    expect(body.value).toBe("Pay cash");
-
-    fireEvent.input(body, { target: { value: "Pay card" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() =>
-      expect(mocked.update).toHaveBeenCalledWith({
-        id: "n1",
-        title: "Trip",
-        body: "Pay card",
-      })
-    );
+    const editor = await screen.findByTestId("note-editor");
+    expect(editor).toHaveAttribute("data-note-id", "n1");
   });
 
   it("renders (Untitled) for a blank-title note", async () => {
@@ -82,7 +73,8 @@ describe("NotesView editor", () => {
       {
         id: "n2",
         title: "  ",
-        body: "",
+        body: "{}",
+        body_text: "",
         created_at: 0,
         updated_at: 0,
         deleted_at: null,
