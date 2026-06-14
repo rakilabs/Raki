@@ -3,7 +3,7 @@ use raki_domain::body::body_to_blocks;
 const CHUNK_CAP: usize = 1600;
 const MAX_CHUNKS_PER_NOTE: usize = 32;
 
-/// Split text into chunks no longer than `CHUNK_CAP` chars.
+/// Split text into chunks no longer than `CHUNK_CAP` bytes.
 /// Prefer splitting at whitespace. If a single word exceeds the cap, keep it intact.
 pub fn cap_split(text: &str) -> Vec<String> {
     if text.is_empty() {
@@ -15,7 +15,10 @@ pub fn cap_split(text: &str) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut start = 0;
     while start < text.len() {
-        let end = (start + CHUNK_CAP).min(text.len());
+        let mut end = (start + CHUNK_CAP).min(text.len());
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
         let split_at = if end == text.len() {
             end
         } else {
@@ -157,6 +160,24 @@ mod tests {
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0], "x".repeat(CHUNK_CAP));
         assert_eq!(chunks[1], "x".repeat(2000 - CHUNK_CAP));
+    }
+
+    #[test]
+    fn cap_split_respects_multibyte_char_boundaries() {
+        // '大' is 3 bytes in UTF-8. 534 repetitions = 1602 bytes, so byte 1600
+        // falls inside a character and would panic if we sliced blindly.
+        let text = "大".repeat(534);
+        let chunks = cap_split(&text);
+        assert!(!chunks.is_empty());
+        let recovered = chunks.join("");
+        assert_eq!(recovered, text);
+        for chunk in &chunks {
+            assert!(
+                chunk.len() <= CHUNK_CAP,
+                "chunk too long: {} bytes",
+                chunk.len()
+            );
+        }
     }
 
     #[test]
