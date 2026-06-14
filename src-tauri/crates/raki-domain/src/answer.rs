@@ -40,5 +40,6 @@ pub struct Answer {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EgressPreview {
     pub provider: String,
+    pub summary: String,
     pub source_titles: Vec<String>,
 }

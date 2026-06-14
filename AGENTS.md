@@ -147,7 +147,7 @@ Raki/
         ├── raki-storage/     ← rusqlite (bundled SQLite + FTS5 + sqlite-vec). THE ONLY SQL.
         ├── raki-retrieval/   ← hybrid search: BM25 ⊕ vector KNN, RRF fusion, chunking, rerank
         ├── raki-ai/          ← provider abstraction (local + cloud) + egress/consent policy
-        └── raki-memory/      ← embedding pipeline, memory extraction/lifecycle, context assembly
+        └── raki-memory/      ← embedding pipeline, memory extraction/lifecycle, context assembly, grounded answer orchestration; depends on raki-retrieval for recall
 
 > Note: `raki-app` from the dependency graph is realized as the **`src-tauri` root package** itself — Tauri's `generate_context!` must run in the crate that owns `tauri.conf.json`. The 5 crates under `crates/` are the inward layers; nothing depends on the `src-tauri` package, so the dependency rule still holds.
 ```
@@ -166,8 +166,10 @@ Raki/
                                 raki-domain   (types + traits; depends on ~nothing)
 ```
 
-- `raki-memory` & `raki-retrieval` depend on **`raki-domain` only**. They receive `Arc<dyn Trait>`
-  adapters (storage, ai) injected by `raki-app`. They do **not** depend on `raki-storage`/`raki-ai` crates directly.
+- `raki-memory` depends on **`raki-domain`** and **`raki-retrieval`** (for recall). It receives
+  `Arc<dyn Trait>` adapters (storage, ai) injected by `raki-app`. It does **not** depend on
+  `raki-storage`, `raki-ai`, or `raki-app` directly.
+- `raki-retrieval` depends on **`raki-domain` only**.
 - `raki-storage` & `raki-ai` depend on **`raki-domain` only** (they implement its ports).
 - `raki-app` depends on everything and wires it together. **Nothing depends on `raki-app`.**
 
@@ -184,7 +186,7 @@ ownership boundary. If you can't say what a crate does in one sentence, it's wro
 | **`raki-storage`** | Persist and retrieve domain entities in one SQLite file. | rusqlite connections (WAL), migrations, repositories, FTS5 + `sqlite-vec` primitives, the change-log. | Business rules, ranking/fusion logic, AI calls, UI concerns. |
 | **`raki-retrieval`** | Turn a query into ranked, provenance-tagged results. | Chunking strategy, BM25 + vector KNN orchestration, **RRF fusion**, optional rerank, query planning. | SQL strings (calls storage ports), model loading (calls ai ports). |
 | **`raki-ai`** | Provide embeddings & completions from any provider, safely. | `EmbeddingProvider`/`LlmProvider` implementations (Ollama, fastembed, OpenAI/Anthropic-compat), provider registry, **egress policy & consent gate**, retries/backoff. | Persistence, retrieval ranking, memory rules. |
-| **`raki-memory`** | The brain: ingest, remember, and assemble context. | The embedding **pipeline** (orchestration), memory **extraction & lifecycle**, **context assembly** (`AssembledContext`). | SQL, HTTP, model loading — all via injected ports. |
+| **`raki-memory`** | The brain: ingest, remember, assemble context, and orchestrate grounded answers. | The embedding **pipeline** (orchestration), memory **extraction & lifecycle**, **context assembly** (`AssembledContext`), **grounded answer orchestration** (`AnswerService`). | SQL, HTTP, model loading — all via injected ports. |
 | **`raki-app`** | Wire everything and expose it to the UI. | App state, the composition root (construct adapters, inject into services), `#[tauri::command]` adapters, IPC type generation. | Business logic (commands are thin), SQL, ranking, provider details. |
 
 > **Rule of ownership:** if you're adding logic and you're not sure which crate owns it, ask: *"Could I unit-test

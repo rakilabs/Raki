@@ -1,6 +1,6 @@
 //! The memory layer: embedding pipeline, memory lifecycle, and context assembly.
 
-pub mod answer;
+mod answer;
 mod chunk;
 mod context;
 pub mod indexing;

@@ -77,9 +77,9 @@ impl AnswerService {
         };
         match self.send(&ctx, query).await {
             Ok(ans) => Ok(AnswerResult::Answer(ans)),
-            Err(GenerateError::Egress(EgressError::Denied(EgressDenied::ConsentRequired))) => {
-                Ok(AnswerResult::NeedsConsent(self.preview_from_context(&ctx, &titles)))
-            }
+            Err(GenerateError::Egress(EgressError::Denied(EgressDenied::ConsentRequired))) => Ok(
+                AnswerResult::NeedsConsent(self.preview_from_context(&ctx, &titles)),
+            ),
             Err(e) => Err(e),
         }
     }
@@ -108,6 +108,7 @@ impl AnswerService {
             .collect();
         EgressPreview {
             provider: self.config.provider.clone(),
+            summary: ctx.egress.summary(),
             source_titles,
         }
     }
@@ -496,7 +497,36 @@ mod flow_tests {
         };
         assert_eq!(preview.provider, "kimi");
         assert_eq!(preview.source_titles, vec!["Trip".to_string()]);
+        assert!(
+            preview.summary.contains("1 sources") && preview.summary.contains("kimi/k2"),
+            "summary should describe the egress: {}",
+            preview.summary
+        );
         assert_eq!(fake.call_count(), 0, "no send while denied");
+    }
+
+    #[tokio::test]
+    async fn preview_returns_metadata_when_match_exists() {
+        let nid = NoteId::new();
+        let fake = Arc::new(FakeLlmProvider::ok("unused"));
+        let log = Arc::new(SpyLog::default());
+        let g = gate(fake.clone(), log.clone());
+        let notes: Arc<dyn NoteRepository> = Arc::new(OneNote(nid));
+        let vectors: Arc<dyn VectorIndex> = Arc::new(OneVector(nid.to_string()));
+        let svc = service(g, notes, vectors);
+        let preview = svc
+            .preview("how do I pay?", None)
+            .await
+            .unwrap()
+            .expect("expected a preview");
+        assert_eq!(preview.provider, "kimi");
+        assert_eq!(preview.source_titles, vec!["Trip".to_string()]);
+        assert!(
+            preview.summary.contains("1 sources") && preview.summary.contains("kimi/k2"),
+            "summary should describe the egress: {}",
+            preview.summary
+        );
+        assert_eq!(fake.call_count(), 0, "preview never sends");
     }
 
     #[tokio::test]

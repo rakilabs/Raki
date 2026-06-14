@@ -147,6 +147,7 @@ pub async fn preview(
         .collect();
     Ok(Some(EgressPreview {
         provider: deps.provider.to_string(),
+        summary: ctx.egress.summary(),
         source_titles,
     }))
 }
