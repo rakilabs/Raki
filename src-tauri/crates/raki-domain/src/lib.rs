@@ -13,7 +13,7 @@ pub mod query;
 pub mod testing;
 
 pub use answer::{Answer, AnswerState, EgressPreview};
-pub use body::{body_to_text, text_to_body};
+pub use body::{assign_block_ids, body_to_blocks, body_to_text, normalize_body, text_to_body};
 pub use clock::Clock;
 pub use egress::{
     EgressDecision, EgressDenied, EgressError, EgressLog, EgressLogId, EgressRecord,

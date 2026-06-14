@@ -4,6 +4,8 @@
 
 use serde_json::{json, Value};
 
+use crate::DomainError;
+
 /// Flatten a canonical ProseMirror `doc` to plain text: each top-level block's text joined
 /// with `\n` between blocks; text nodes within a block concatenated directly (their own
 /// spacing is preserved). Total and defensive — never panics:
@@ -52,6 +54,8 @@ pub struct Block {
     pub heading: Option<String>,
     /// The plain text content of the block.
     pub text: String,
+    /// Stable identifier assigned to this top-level block, if present.
+    pub block_id: Option<String>,
 }
 
 /// Parse a canonical ProseMirror `doc` into structural blocks.
@@ -73,6 +77,11 @@ pub fn body_to_blocks(body: &str) -> Vec<Block> {
     let mut current_heading: Option<String> = None;
     if let Some(content) = value.get("content").and_then(Value::as_array) {
         for node in content {
+            let block_id = node
+                .get("attrs")
+                .and_then(|a| a.get("blockId"))
+                .and_then(Value::as_str)
+                .map(String::from);
             let node_type = node.get("type").and_then(Value::as_str);
             match node_type {
                 Some("heading") => {
@@ -87,6 +96,7 @@ pub fn body_to_blocks(body: &str) -> Vec<Block> {
                         blocks.push(Block {
                             heading: current_heading.clone(),
                             text,
+                            block_id,
                         });
                     }
                 }
@@ -106,6 +116,7 @@ pub fn body_to_blocks(body: &str) -> Vec<Block> {
                         blocks.push(Block {
                             heading: current_heading.clone(),
                             text,
+                            block_id,
                         });
                     }
                 }
@@ -116,24 +127,77 @@ pub fn body_to_blocks(body: &str) -> Vec<Block> {
     blocks
 }
 
+use uuid::Uuid;
+
+/// Normalize a ProseMirror-JSON body: ensure it is a valid `doc` and that every top-level
+/// block has a stable `blockId`. Existing block IDs are preserved; missing ones are assigned.
+pub fn normalize_body(body: &str) -> Result<String, DomainError> {
+    let mut value: Value = serde_json::from_str(body)
+        .map_err(|e| DomainError::Invalid(format!("invalid body json: {e}")))?;
+    if value.get("type").and_then(Value::as_str) != Some("doc") {
+        return Err(DomainError::Invalid("body must be a ProseMirror doc".into()));
+    }
+    assign_block_ids(&mut value);
+    Ok(value.to_string())
+}
+
+/// Assign a UUIDv7 block ID to every top-level block node that does not already have one.
+pub fn assign_block_ids(doc: &mut Value) {
+    let Some(content) = doc.get_mut("content").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for node in content.iter_mut() {
+        if !is_top_level_block(node) {
+            continue;
+        }
+        let attrs = node
+            .as_object_mut()
+            .unwrap()
+            .entry("attrs")
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .unwrap();
+        if !attrs.contains_key("blockId") {
+            attrs.insert("blockId".to_string(), json!(new_block_id()));
+        }
+    }
+}
+
+fn is_top_level_block(node: &Value) -> bool {
+    matches!(
+        node.get("type").and_then(Value::as_str),
+        Some("paragraph") | Some("heading") | Some("bulletList") | Some("orderedList") | Some("codeBlock")
+    )
+}
+
+fn new_block_id() -> String {
+    Uuid::now_v7().to_string()
+}
+
 /// Wrap plain editor text into a canonical ProseMirror `doc`: one `paragraph` per line,
 /// each holding a single `text` node (empty lines → empty paragraphs). Empty input → an
 /// empty `doc`. Inverse of `body_to_text` for line-separated plain text.
 pub fn text_to_body(text: &str) -> String {
-    let content: Vec<Value> = if text.is_empty() {
-        Vec::new()
+    let mut doc: Value = if text.is_empty() {
+        json!({ "type": "doc", "content": [] })
     } else {
-        text.split('\n')
+        let content: Vec<Value> = text
+            .split('\n')
             .map(|line| {
                 if line.is_empty() {
                     json!({ "type": "paragraph" })
                 } else {
-                    json!({ "type": "paragraph", "content": [{ "type": "text", "text": line }] })
+                    json!({
+                        "type": "paragraph",
+                        "content": [{ "type": "text", "text": line }]
+                    })
                 }
             })
-            .collect()
+            .collect();
+        json!({ "type": "doc", "content": content })
     };
-    json!({ "type": "doc", "content": content }).to_string()
+    assign_block_ids(&mut doc);
+    doc.to_string()
 }
 
 #[cfg(test)]
@@ -252,5 +316,42 @@ mod tests {
         let doc = r#"{"type":"doc","content":[{"type":"horizontalRule"}]}"#;
         let blocks = body_to_blocks(doc);
         assert!(blocks.is_empty());
+    }
+
+    #[test]
+    fn normalize_body_assigns_ids_to_blocks_missing_them() {
+        let body = r#"{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hi"}]}]}"#;
+        let out = normalize_body(body).unwrap();
+        assert!(out.contains("blockId"));
+    }
+
+    #[test]
+    fn normalize_body_preserves_existing_block_ids() {
+        let body = r#"{"type":"doc","content":[{"type":"paragraph","attrs":{"blockId":"existing-id"},"content":[{"type":"text","text":"hi"}]}]}"#;
+        let out = normalize_body(body).unwrap();
+        assert!(out.contains("\"blockId\":\"existing-id\""));
+    }
+
+    #[test]
+    fn normalize_body_rejects_non_doc_json() {
+        let body = r#"{"type":"not-a-doc"}"#;
+        assert!(normalize_body(body).is_err());
+    }
+
+    #[test]
+    fn body_to_blocks_extracts_block_id() {
+        let doc = r#"{"type":"doc","content":[{"type":"paragraph","attrs":{"blockId":"bid-1"},"content":[{"type":"text","text":"first"}]}]}"#;
+        let blocks = body_to_blocks(doc);
+        assert_eq!(blocks[0].block_id, Some("bid-1".to_string()));
+    }
+
+    #[test]
+    fn text_to_body_assigns_block_ids() {
+        let body = text_to_body("line one\nline two");
+        let blocks = body_to_blocks(&body);
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks[0].block_id.is_some());
+        assert!(blocks[1].block_id.is_some());
+        assert_ne!(blocks[0].block_id, blocks[1].block_id);
     }
 }
