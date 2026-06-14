@@ -205,15 +205,12 @@ fn build_system_prompt(ctx: &AssembledContext) -> String {
 mod flow_tests {
     use super::*;
     use async_trait::async_trait;
-    use std::collections::HashSet;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use raki_ai::testing::FakeLlmProvider;
-    use raki_ai::AuditGate;
-    use raki_domain::testing::FixedClock;
     use raki_domain::{
-        DomainError, EgressLog, EgressLogId, EgressRecord, EgressSettings, Embedding, KeywordHit,
-        Note, NoteId, VectorHit,
+        Completion, DomainError, EgressDenied, EgressError, EgressLog, EgressLogId, EgressRecord,
+        Embedding, KeywordHit, Note, NoteId, VectorHit,
     };
 
     // --- fakes (impl domain ports) ---
@@ -327,34 +324,73 @@ mod flow_tests {
             Ok(vec![])
         }
     }
-    struct ConsentedSettings;
+
+    /// Local gated-provider fake so `raki-memory` tests do not depend on `raki-ai`.
+    struct FakeGatedLlmProvider {
+        reply: Mutex<String>,
+        allowed: Mutex<bool>,
+        calls: AtomicUsize,
+        log: Arc<SpyLog>,
+    }
+    impl FakeGatedLlmProvider {
+        fn ok(reply: &str, log: Arc<SpyLog>) -> Self {
+            Self {
+                reply: Mutex::new(reply.to_string()),
+                allowed: Mutex::new(true),
+                calls: AtomicUsize::new(0),
+                log,
+            }
+        }
+        fn denied(log: Arc<SpyLog>) -> Self {
+            Self {
+                reply: Mutex::new(String::new()),
+                allowed: Mutex::new(false),
+                calls: AtomicUsize::new(0),
+                log,
+            }
+        }
+        fn allow(&self, reply: &str) {
+            *self.reply.lock().unwrap() = reply.to_string();
+            *self.allowed.lock().unwrap() = true;
+        }
+        fn call_count(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
     #[async_trait]
-    impl EgressSettings for ConsentedSettings {
-        async fn consented(&self) -> Result<HashSet<String>, DomainError> {
-            Ok(HashSet::from(["kimi".to_string()]))
+    impl GatedLlmProvider for FakeGatedLlmProvider {
+        async fn complete_gated(
+            &self,
+            _egress: &raki_domain::EgressDecision,
+            _req: raki_domain::CompletionRequest,
+        ) -> Result<(Completion, Option<EgressLogId>), EgressError> {
+            if *self.allowed.lock().unwrap() {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok((
+                    Completion {
+                        text: self.reply.lock().unwrap().clone(),
+                    },
+                    Some(EgressLogId::new()),
+                ))
+            } else {
+                Err(EgressError::Denied(EgressDenied::ConsentRequired))
+            }
         }
-        async fn grant(&self, _: &str) -> Result<(), DomainError> {
-            Ok(())
-        }
-        async fn revoke(&self, _: &str) -> Result<(), DomainError> {
-            Ok(())
+        async fn set_grounded(&self, id: &EgressLogId, grounded: bool) -> Result<(), DomainError> {
+            self.log.set_grounded(id, grounded).await
         }
     }
 
-    fn gate(
-        inner: Arc<dyn raki_domain::LlmProvider>,
-        log: Arc<SpyLog>,
-    ) -> Arc<dyn GatedLlmProvider> {
-        Arc::new(AuditGate::new(
-            inner,
-            Arc::new(ConsentedSettings),
-            log,
-            Arc::new(FixedClock(1000)),
-        ))
+    fn gate(reply: &str, log: Arc<SpyLog>) -> Arc<FakeGatedLlmProvider> {
+        Arc::new(FakeGatedLlmProvider::ok(reply, log))
+    }
+
+    fn denied_gate(log: Arc<SpyLog>) -> Arc<FakeGatedLlmProvider> {
+        Arc::new(FakeGatedLlmProvider::denied(log))
     }
 
     fn service(
-        gate: Arc<dyn GatedLlmProvider>,
+        gate: Arc<FakeGatedLlmProvider>,
         notes: Arc<dyn NoteRepository>,
         vectors: Arc<dyn VectorIndex>,
     ) -> AnswerService {
@@ -371,38 +407,6 @@ mod flow_tests {
                 budget: 10_000,
             },
         )
-    }
-
-    #[derive(Default)]
-    struct ToggleSettings {
-        consented: Mutex<HashSet<String>>,
-    }
-    #[async_trait]
-    impl EgressSettings for ToggleSettings {
-        async fn consented(&self) -> Result<HashSet<String>, DomainError> {
-            Ok(self.consented.lock().unwrap().clone())
-        }
-        async fn grant(&self, p: &str) -> Result<(), DomainError> {
-            self.consented.lock().unwrap().insert(p.to_string());
-            Ok(())
-        }
-        async fn revoke(&self, p: &str) -> Result<(), DomainError> {
-            self.consented.lock().unwrap().remove(p);
-            Ok(())
-        }
-    }
-
-    fn toggle_gate(
-        inner: Arc<dyn raki_domain::LlmProvider>,
-        settings: Arc<ToggleSettings>,
-        log: Arc<SpyLog>,
-    ) -> Arc<dyn GatedLlmProvider> {
-        Arc::new(AuditGate::new(
-            inner,
-            settings,
-            log,
-            Arc::new(FixedClock(1000)),
-        ))
     }
 
     struct FakeRewriter(&'static str);
@@ -427,9 +431,8 @@ mod flow_tests {
         let nid = NoteId::new();
         let reply = r#"{"answer":"Pay cash.","cited_source_ids":["IDPLACEHOLDER"],"insufficient_context":false}"#
             .replace("IDPLACEHOLDER", &nid.to_string());
-        let fake = Arc::new(FakeLlmProvider::ok(&reply));
         let log = Arc::new(SpyLog::default());
-        let g = gate(fake.clone(), log.clone());
+        let g = gate(&reply, log.clone());
         let notes: Arc<dyn NoteRepository> = Arc::new(OneNote(nid));
         let vectors: Arc<dyn VectorIndex> = Arc::new(OneVector(nid.to_string()));
         let svc = service(g, notes, vectors);
@@ -439,47 +442,44 @@ mod flow_tests {
         };
         assert_eq!(ans.state, AnswerState::Grounded);
         assert!(ans.egress_log_id.is_some());
-        let g = log.grounded.lock().unwrap();
-        assert_eq!(g.len(), 1);
-        assert!(g[0].1, "set_grounded(true) called");
+        let grounded = log.grounded.lock().unwrap();
+        assert_eq!(grounded.len(), 1);
+        assert!(grounded[0].1, "set_grounded(true) called");
     }
 
     #[tokio::test]
     async fn no_candidates_short_circuits_before_the_gate() {
         let nid = NoteId::new();
-        let fake = Arc::new(FakeLlmProvider::ok("unused"));
         let log = Arc::new(SpyLog::default());
-        let g = gate(fake.clone(), log.clone());
+        let g = gate("unused", log.clone());
         let notes: Arc<dyn NoteRepository> = Arc::new(EmptyRepo);
         let vectors: Arc<dyn VectorIndex> = Arc::new(OneVector(nid.to_string()));
-        let svc = service(g, notes, vectors);
+        let svc = service(g.clone(), notes, vectors);
         let result = svc.answer("anything", None).await.unwrap();
         let AnswerResult::Answer(ans) = result else {
             panic!("expected Answer, got {result:?}");
         };
         assert_eq!(ans.state, AnswerState::NothingMatched);
         assert!(ans.egress_log_id.is_none());
-        assert_eq!(fake.call_count(), 0, "no send");
+        assert_eq!(g.call_count(), 0, "no send");
         assert!(log.grounded.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn ungrounded_answer_sets_grounded_false() {
         let nid = NoteId::new();
-        let fake = Arc::new(FakeLlmProvider::ok(
-            r#"{"answer":"the sky is blue","cited_source_ids":[]}"#,
-        ));
+        let reply = r#"{"answer":"the sky is blue","cited_source_ids":[]}"#;
         let log = Arc::new(SpyLog::default());
-        let g = gate(fake.clone(), log.clone());
+        let g = gate(reply, log.clone());
         let notes: Arc<dyn NoteRepository> = Arc::new(OneNote(nid));
         let vectors: Arc<dyn VectorIndex> = Arc::new(OneVector(nid.to_string()));
-        let svc = service(g, notes, vectors);
+        let svc = service(g.clone(), notes, vectors);
         let result = svc.answer("why is the sky blue?", None).await.unwrap();
         let AnswerResult::Answer(ans) = result else {
             panic!("expected Answer, got {result:?}");
         };
         assert_eq!(ans.state, AnswerState::Ungrounded);
-        assert_eq!(fake.call_count(), 1, "it did send");
+        assert_eq!(g.call_count(), 1, "it did send");
         let grounded = log.grounded.lock().unwrap();
         assert_eq!(grounded.len(), 1);
         assert!(
@@ -491,13 +491,11 @@ mod flow_tests {
     #[tokio::test]
     async fn answer_returns_needs_consent_when_not_consented() {
         let nid = NoteId::new();
-        let fake = Arc::new(FakeLlmProvider::ok("unused"));
         let log = Arc::new(SpyLog::default());
-        let settings = Arc::new(ToggleSettings::default());
-        let g = toggle_gate(fake.clone(), settings, log.clone());
+        let g = denied_gate(log.clone());
         let notes: Arc<dyn NoteRepository> = Arc::new(OneNote(nid));
         let vectors: Arc<dyn VectorIndex> = Arc::new(OneVector(nid.to_string()));
-        let svc = service(g, notes, vectors);
+        let svc = service(g.clone(), notes, vectors);
         let result = svc.answer("how do I pay?", None).await.unwrap();
         let AnswerResult::NeedsConsent(preview) = result else {
             panic!("expected NeedsConsent, got {result:?}");
@@ -509,18 +507,17 @@ mod flow_tests {
             "summary should describe the egress: {}",
             preview.summary
         );
-        assert_eq!(fake.call_count(), 0, "no send while denied");
+        assert_eq!(g.call_count(), 0, "no send while denied");
     }
 
     #[tokio::test]
     async fn preview_returns_metadata_when_match_exists() {
         let nid = NoteId::new();
-        let fake = Arc::new(FakeLlmProvider::ok("unused"));
         let log = Arc::new(SpyLog::default());
-        let g = gate(fake.clone(), log.clone());
+        let g = gate("unused", log.clone());
         let notes: Arc<dyn NoteRepository> = Arc::new(OneNote(nid));
         let vectors: Arc<dyn VectorIndex> = Arc::new(OneVector(nid.to_string()));
-        let svc = service(g, notes, vectors);
+        let svc = service(g.clone(), notes, vectors);
         let preview = svc
             .preview("how do I pay?", None)
             .await
@@ -533,15 +530,14 @@ mod flow_tests {
             "summary should describe the egress: {}",
             preview.summary
         );
-        assert_eq!(fake.call_count(), 0, "preview never sends");
+        assert_eq!(g.call_count(), 0, "preview never sends");
     }
 
     #[tokio::test]
     async fn answer_is_nothing_matched_when_repo_empty() {
         let nid = NoteId::new();
-        let fake = Arc::new(FakeLlmProvider::ok("unused"));
         let log = Arc::new(SpyLog::default());
-        let g = gate(fake, log);
+        let g = gate("unused", log);
         let notes: Arc<dyn NoteRepository> = Arc::new(EmptyRepo);
         let vectors: Arc<dyn VectorIndex> = Arc::new(OneVector(nid.to_string()));
         let svc = service(g, notes, vectors);
@@ -554,9 +550,8 @@ mod flow_tests {
 
     #[tokio::test]
     async fn rewriter_is_forwarded_to_hybrid_search() {
-        let fake = Arc::new(FakeLlmProvider::ok("unused"));
         let log = Arc::new(SpyLog::default());
-        let g = gate(fake, log);
+        let g = gate("unused", log);
         let notes: Arc<dyn NoteRepository> = Arc::new(OneNote(NoteId::new()));
         let vectors: Arc<dyn VectorIndex> = Arc::new(OneVector(NoteId::new().to_string()));
         let svc = service(g, notes, vectors);
@@ -571,27 +566,25 @@ mod flow_tests {
         let nid = NoteId::new();
         let reply = r#"{"answer":"Pay cash.","cited_source_ids":["IDPLACEHOLDER"],"insufficient_context":false}"#
             .replace("IDPLACEHOLDER", &nid.to_string());
-        let fake = Arc::new(FakeLlmProvider::ok(&reply));
         let log = Arc::new(SpyLog::default());
-        let settings = Arc::new(ToggleSettings::default());
-        let g = toggle_gate(fake.clone(), settings.clone(), log.clone());
+        let g = denied_gate(log.clone());
         let notes: Arc<dyn NoteRepository> = Arc::new(OneNote(nid));
         let vectors: Arc<dyn VectorIndex> = Arc::new(OneVector(nid.to_string()));
-        let svc = service(g, notes, vectors);
+        let svc = service(g.clone(), notes, vectors);
 
         let result = svc.answer("how do I pay?", None).await.unwrap();
         let AnswerResult::NeedsConsent(_) = result else {
             panic!("expected NeedsConsent, got {result:?}");
         };
-        assert_eq!(fake.call_count(), 0, "no send while denied");
+        assert_eq!(g.call_count(), 0, "no send while denied");
 
-        settings.grant("kimi").await.unwrap();
+        g.allow(&reply);
 
         let result = svc.answer("how do I pay?", None).await.unwrap();
         let AnswerResult::Answer(ans) = result else {
             panic!("expected Answer, got {result:?}");
         };
         assert_eq!(ans.state, AnswerState::Grounded);
-        assert_eq!(fake.call_count(), 1, "send after consent");
+        assert_eq!(g.call_count(), 1, "send after consent");
     }
 }

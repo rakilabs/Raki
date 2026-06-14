@@ -12,5 +12,4 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
-raki-ai = { workspace = true }
 tokio = { workspace = true }

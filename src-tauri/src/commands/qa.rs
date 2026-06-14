@@ -2,7 +2,6 @@
 
 use tauri::State;
 
-use raki_domain::AnswerState;
 use raki_memory::AnswerResult;
 
 use crate::dto::{AnswerOutcome, CitedNote, EgressPreviewDto};
@@ -17,13 +16,6 @@ pub async fn answer_question(
     let rewriter = state.rewriter.as_ref().map(|r| r.as_ref());
 
     match state.answer_service.answer(&query, rewriter).await? {
-        AnswerResult::Answer(ans) if ans.state == AnswerState::NothingMatched => {
-            Ok(AnswerOutcome::Answer {
-                state: AnswerState::NothingMatched.name().to_string(),
-                text: "No relevant notes found.".into(),
-                cited: vec![],
-            })
-        }
         AnswerResult::Answer(ans) => Ok(AnswerOutcome::Answer {
             state: ans.state.name().to_string(),
             text: ans.text,

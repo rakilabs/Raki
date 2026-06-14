@@ -10,8 +10,8 @@ use serde::Deserialize;
 struct ModelReply {
     #[serde(default)]
     answer: String,
-    // `Option` so an explicit `null` (not just a missing field) is tolerated, not a parse error
-    // (review #5). `unwrap_or_default()` below maps both null and missing to empty/false.
+    // `Option` so an explicit `null` (not just a missing field) is tolerated, not a parse error.
+    // Null/missing citations map to an empty vec, which is classified as Ungrounded below.
     #[serde(default)]
     cited_source_ids: Option<Vec<String>>,
     #[serde(default)]
@@ -21,7 +21,7 @@ struct ModelReply {
 /// Candidate JSON substrings in priority order: a fenced ```json … ``` block first (the model put
 /// the answer there deliberately), then every balanced top-level `{…}` object. The caller try-parses
 /// each and uses the first that fits `ModelReply` — so prose containing decoy braces before the real
-/// object no longer forces `ParseFailed` (review #1). String contents are skipped so a `{` or `}`
+/// object no longer forces `ParseFailed`. String contents are skipped so a `{` or `}`
 /// inside a JSON string value can't miscount depth.
 fn candidate_blocks(raw: &str) -> Vec<&str> {
     let mut out = Vec::new();
@@ -111,7 +111,7 @@ pub fn evaluate(
         .filter(|c| seen.insert(c.clone()))
         .collect();
     if cites.is_empty() {
-        return (AnswerState::Ungrounded, reply.answer, vec![]); // review #2/M10: no provenance
+        return (AnswerState::Ungrounded, reply.answer, vec![]); // zero provenance citations → Ungrounded
     }
     if cites.iter().any(|c| !context_ids.contains(c)) {
         return (AnswerState::Ungrounded, reply.answer, cites); // fabricated citation
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn skips_decoy_braces_before_the_real_json() {
-        // review #1: prose with a non-JSON brace pair, then the real fenced object.
+        // Prose with a non-JSON decoy brace pair, then the real fenced JSON object.
         let raw = "Here is the answer: {not available}\n```json\n{\"answer\":\"yes\",\"cited_source_ids\":[\"n1\"]}\n```";
         let (s, text, _) = evaluate(raw, &ctx(&["n1"]));
         assert_eq!(s, AnswerState::Grounded);
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn null_citations_are_ungrounded_not_parse_failed() {
-        // review #5: explicit null array → 0 citations → Ungrounded, not ParseFailed.
+        // Explicit null/missing citations map to empty → 0 citations → Ungrounded, not ParseFailed.
         let raw = r#"{"answer":"x","cited_source_ids":null,"insufficient_context":null}"#;
         assert_eq!(evaluate(raw, &ctx(&["n1"])).0, AnswerState::Ungrounded);
     }
