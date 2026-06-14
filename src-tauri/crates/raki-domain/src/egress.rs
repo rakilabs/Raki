@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::DomainError;
+use crate::ports::{Completion, CompletionRequest};
 
 /// Opaque id of a retrieval source in a context — a note id today, a block id once chunking ships.
 /// A newtype so it can't be confused with a provider or model string.
@@ -118,6 +119,19 @@ pub trait EgressSettings: Send + Sync {
     async fn consented(&self) -> Result<HashSet<String>, DomainError>;
     async fn grant(&self, provider: &str) -> Result<(), DomainError>;
     async fn revoke(&self, provider: &str) -> Result<(), DomainError>;
+}
+
+/// A cloud/local LLM provider whose completions are gated by the egress policy and audit log.
+/// Implemented in `raki-ai`; lives in the domain so `raki-memory` can call it without depending
+/// on `raki-ai`.
+#[async_trait]
+pub trait GatedLlmProvider: Send + Sync {
+    async fn complete_gated(
+        &self,
+        egress: &EgressDecision,
+        req: CompletionRequest,
+    ) -> Result<(Completion, Option<EgressLogId>), EgressError>;
+    async fn set_grounded(&self, id: &EgressLogId, grounded: bool) -> Result<(), DomainError>;
 }
 
 #[cfg(test)]

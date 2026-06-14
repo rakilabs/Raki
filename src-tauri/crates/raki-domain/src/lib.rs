@@ -14,7 +14,7 @@ pub use body::{body_to_text, text_to_body};
 pub use clock::Clock;
 pub use egress::{
     EgressDecision, EgressDenied, EgressError, EgressLog, EgressLogId, EgressRecord,
-    EgressSettings, SourceId,
+    EgressSettings, GatedLlmProvider, SourceId,
 };
 pub use error::DomainError;
 pub use ids::NoteId;
