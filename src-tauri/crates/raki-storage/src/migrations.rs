@@ -85,6 +85,11 @@ const MIGRATIONS: &[&str] = &[
         FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
     ) STRICT;
     CREATE INDEX idx_note_signals_last_accessed ON note_signals(last_accessed_at) WHERE deleted_at IS NULL;",
+    // V9: block-scoped vector source IDs. The source-id format changed from
+    // `{note_id}#{chunk_index}` to `{note_id}:{block_id}:{split_index}`. Clear all
+    // chunk vectors and staleness stamps so the indexer rebuilds with the new format.
+    "DELETE FROM chunk_vectors;
+     UPDATE notes SET embedded_hash = NULL;",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
