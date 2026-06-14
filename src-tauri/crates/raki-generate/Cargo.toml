@@ -8,10 +8,10 @@ license.workspace = true
 raki-domain = { workspace = true }
 raki-retrieval = { workspace = true }
 raki-memory = { workspace = true }
-raki-ai = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+raki-ai = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }

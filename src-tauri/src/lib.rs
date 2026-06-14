@@ -11,7 +11,9 @@ use std::sync::Arc;
 
 use tauri::Manager;
 
-use raki_ai::{AuditGate, CloudQueryRewriter, FakeEmbeddingProvider, FastEmbedProvider, MessagesProvider};
+use raki_ai::{
+    AuditGate, CloudQueryRewriter, FakeEmbeddingProvider, FastEmbedProvider, MessagesProvider,
+};
 use raki_domain::{
     Clock, Completion, CompletionRequest, DomainError, EmbeddingProvider, GatedLlmProvider,
     IndexingStore, LlmProvider, Locality, MixerConfig, QueryRewriter, Reranker, SignalBooster,

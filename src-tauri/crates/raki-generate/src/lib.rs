@@ -311,7 +311,10 @@ mod flow_tests {
         }
     }
 
-    fn gate(inner: Arc<dyn raki_domain::LlmProvider>, log: Arc<SpyLog>) -> Arc<dyn GatedLlmProvider> {
+    fn gate(
+        inner: Arc<dyn raki_domain::LlmProvider>,
+        log: Arc<SpyLog>,
+    ) -> Arc<dyn GatedLlmProvider> {
         Arc::new(raki_ai::AuditGate::new(
             inner,
             Arc::new(ConsentedSettings),
@@ -369,7 +372,12 @@ mod flow_tests {
         settings: Arc<ToggleSettings>,
         log: Arc<SpyLog>,
     ) -> Arc<dyn GatedLlmProvider> {
-        Arc::new(raki_ai::AuditGate::new(inner, settings, log, Arc::new(FixedClock(1000))))
+        Arc::new(raki_ai::AuditGate::new(
+            inner,
+            settings,
+            log,
+            Arc::new(FixedClock(1000)),
+        ))
     }
 
     #[tokio::test]

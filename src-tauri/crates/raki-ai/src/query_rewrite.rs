@@ -12,8 +12,6 @@ use raki_domain::{
     QueryUnderstanding, SourceId,
 };
 
-
-
 // Real-world timing against kimi-k2-5: simple queries ~1.5-2s, multi-hop ~8-10s.
 // 3s was far too aggressive; 15s gives headroom while still failing fast on genuine hangs.
 // For lower latency, set RAKI_QUERY_REWRITE_MODEL to a cheaper/faster model than the QA model.
@@ -235,7 +233,7 @@ mod tests {
         assert_eq!(truncated.chars().count(), MAX_QUERY_LEN);
     }
 
-    use crate::{AuditGate, testing::FakeLlmProvider};
+    use crate::{testing::FakeLlmProvider, AuditGate};
     use raki_domain::testing::FixedClock;
     use raki_domain::{DomainError, EgressLog, EgressLogId, EgressRecord, EgressSettings};
     use std::collections::HashSet;
