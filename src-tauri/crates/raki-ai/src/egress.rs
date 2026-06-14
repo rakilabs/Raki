@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use raki_domain::{
     Clock, Completion, CompletionRequest, DomainError, EgressDecision, EgressDenied, EgressError,
-    EgressLog, EgressLogId, EgressRecord, EgressSettings, LlmProvider, Locality,
+    EgressLog, EgressLogId, EgressRecord, EgressSettings, GatedLlmProvider, LlmProvider, Locality,
 };
 
 /// Decide whether `decision` may leave the device under the consented set. Pure. `pub(crate)` —
@@ -93,7 +93,7 @@ impl AuditGate {
 }
 
 #[async_trait::async_trait]
-impl raki_domain::GatedLlmProvider for AuditGate {
+impl GatedLlmProvider for AuditGate {
     async fn complete_gated(
         &self,
         egress: &EgressDecision,

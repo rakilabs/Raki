@@ -4,10 +4,10 @@
 
 use std::sync::Arc;
 
-use raki_ai::GatedLlmProvider;
+use raki_ai::AuditGate;
 use raki_domain::{
-    Clock, Completion, CompletionRequest, DomainError, EgressLog, EgressSettings, LlmProvider,
-    Locality, Note, NoteRepository,
+    Clock, Completion, CompletionRequest, DomainError, EgressLog, EgressSettings, GatedLlmProvider,
+    LlmProvider, Locality, Note, NoteRepository,
 };
 use raki_storage::{Database, SqliteEgressLog, SqliteEgressSettings, SqliteNoteRepository};
 
@@ -144,7 +144,7 @@ async fn egress_log_records_cloud_calls_only() {
     settings.grant("kimi").await.unwrap();
 
     let inner: Arc<dyn LlmProvider> = Arc::new(SpyLlm);
-    let gate = GatedLlmProvider::new(inner, settings, log.clone(), clock.clone());
+    let gate = AuditGate::new(inner, settings, log.clone(), clock.clone());
 
     // Assemble a tiny context so the gate allows it
     let ctx = raki_memory::assemble_context(
@@ -185,7 +185,7 @@ async fn local_provider_bypasses_log_and_never_records() {
     let (_notes, settings, log, clock) = setup().await;
 
     let inner: Arc<dyn LlmProvider> = Arc::new(LocalSpyLlm);
-    let gate = GatedLlmProvider::new(inner, settings, log.clone(), clock.clone());
+    let gate = AuditGate::new(inner, settings, log.clone(), clock.clone());
 
     let ctx = raki_memory::assemble_context(
         &[raki_memory::Candidate {

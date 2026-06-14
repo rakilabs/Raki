@@ -2,10 +2,9 @@
 
 use std::sync::Arc;
 
-use raki_ai::GatedLlmProvider;
 use raki_domain::{
-    Clock, EgressLog, EgressSettings, EmbeddingProvider, KeywordIndex, NoteRepository,
-    QueryRewriter, Reranker, SignalBooster, SignalSource, SignalStore, VectorIndex,
+    Clock, EgressLog, EgressSettings, EmbeddingProvider, GatedLlmProvider, KeywordIndex,
+    NoteRepository, QueryRewriter, Reranker, SignalBooster, SignalSource, SignalStore, VectorIndex,
 };
 
 use crate::indexing::IndexingService;
@@ -21,7 +20,7 @@ pub struct AppState {
     pub clock: Arc<dyn Clock>,
     pub index: Arc<IndexingService>,
     /// The only cloud-completion path (wraps MessagesProvider; reads consent live; logs egress).
-    pub gate: Arc<GatedLlmProvider>,
+    pub gate: Arc<dyn GatedLlmProvider>,
     /// Per-provider consent mutation surface for the consent commands.
     pub settings: Arc<dyn EgressSettings>,
     /// Audit log query surface for the settings UI.

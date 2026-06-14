@@ -11,13 +11,11 @@ use std::sync::Arc;
 
 use tauri::Manager;
 
-use raki_ai::{
-    CloudQueryRewriter, FakeEmbeddingProvider, FastEmbedProvider, GatedLlmProvider,
-    MessagesProvider,
-};
+use raki_ai::{AuditGate, CloudQueryRewriter, FakeEmbeddingProvider, FastEmbedProvider, MessagesProvider};
 use raki_domain::{
-    Clock, Completion, CompletionRequest, DomainError, EmbeddingProvider, IndexingStore,
-    LlmProvider, Locality, MixerConfig, QueryRewriter, Reranker, SignalBooster, VectorIndex,
+    Clock, Completion, CompletionRequest, DomainError, EmbeddingProvider, GatedLlmProvider,
+    IndexingStore, LlmProvider, Locality, MixerConfig, QueryRewriter, Reranker, SignalBooster,
+    VectorIndex,
 };
 use raki_memory::signals::DefaultSignalBooster;
 use raki_storage::{
@@ -134,7 +132,7 @@ pub fn run() {
             // Hold a clone for the rewrite-provider fallback path before moving `inner` into `gate`.
             let inner_for_rewrite_fallback = inner.clone();
             let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-            let gate = Arc::new(GatedLlmProvider::new(
+            let gate: Arc<dyn GatedLlmProvider> = Arc::new(AuditGate::new(
                 inner,
                 settings.clone(),
                 egress_log.clone(),
@@ -165,7 +163,7 @@ pub fn run() {
                             inner_for_rewrite_fallback.clone()
                         }
                     };
-                let rewrite_gate = Arc::new(GatedLlmProvider::new(
+                let rewrite_gate: Arc<dyn GatedLlmProvider> = Arc::new(AuditGate::new(
                     rewrite_inner,
                     settings.clone(),
                     egress_log.clone(),

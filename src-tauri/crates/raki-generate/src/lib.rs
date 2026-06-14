@@ -5,10 +5,9 @@ mod groundedness;
 
 pub use groundedness::AnswerState;
 
-use raki_ai::GatedLlmProvider;
 use raki_domain::{
-    body_to_text, DomainError, EgressError, EmbeddingProvider, KeywordIndex, NoteRepository,
-    SourceId, VectorIndex,
+    body_to_text, DomainError, EgressError, EmbeddingProvider, GatedLlmProvider, KeywordIndex,
+    NoteRepository, SourceId, VectorIndex,
 };
 
 /// Everything `answer_question` needs, injected so the flow is fake-testable.
@@ -17,7 +16,7 @@ pub struct GenerateDeps<'a> {
     pub vectors: &'a dyn VectorIndex,
     pub embedder: &'a dyn EmbeddingProvider, // assumed LOCAL (spec M4)
     pub notes: &'a dyn NoteRepository,
-    pub gate: &'a GatedLlmProvider,
+    pub gate: &'a dyn GatedLlmProvider,
     pub provider: &'a str,
     pub model: &'a str,
     pub budget: usize,
@@ -312,17 +311,17 @@ mod flow_tests {
         }
     }
 
-    fn gate(inner: Arc<dyn raki_domain::LlmProvider>, log: Arc<SpyLog>) -> GatedLlmProvider {
-        GatedLlmProvider::new(
+    fn gate(inner: Arc<dyn raki_domain::LlmProvider>, log: Arc<SpyLog>) -> Arc<dyn GatedLlmProvider> {
+        Arc::new(raki_ai::AuditGate::new(
             inner,
             Arc::new(ConsentedSettings),
             log,
             Arc::new(FixedClock(1000)),
-        )
+        ))
     }
 
     fn test_deps<'a>(
-        gate: &'a GatedLlmProvider,
+        gate: &'a dyn GatedLlmProvider,
         notes: &'a dyn NoteRepository,
         vectors: &'a dyn VectorIndex,
     ) -> GenerateDeps<'a> {
@@ -369,8 +368,8 @@ mod flow_tests {
         inner: Arc<dyn raki_domain::LlmProvider>,
         settings: Arc<ToggleSettings>,
         log: Arc<SpyLog>,
-    ) -> GatedLlmProvider {
-        GatedLlmProvider::new(inner, settings, log, Arc::new(FixedClock(1000)))
+    ) -> Arc<dyn GatedLlmProvider> {
+        Arc::new(raki_ai::AuditGate::new(inner, settings, log, Arc::new(FixedClock(1000))))
     }
 
     #[tokio::test]
@@ -383,7 +382,7 @@ mod flow_tests {
         let g = gate(fake, log.clone());
         let note = OneNote(nid);
         let vec = OneVector(nid.to_string());
-        let deps = test_deps(&g, &note, &vec);
+        let deps = test_deps(g.as_ref(), &note, &vec);
         let ans = answer_question("how do I pay at the inn?", &deps)
             .await
             .unwrap();
@@ -401,7 +400,7 @@ mod flow_tests {
         let log = Arc::new(SpyLog::default());
         let g = gate(fake.clone(), log.clone());
         let vec = OneVector(nid.to_string());
-        let deps = test_deps(&g, &EmptyRepo, &vec);
+        let deps = test_deps(g.as_ref(), &EmptyRepo, &vec);
         let ans = answer_question("anything", &deps).await.unwrap();
         assert_eq!(ans.state, AnswerState::NothingMatched);
         assert!(ans.egress_log_id.is_none());
@@ -421,7 +420,7 @@ mod flow_tests {
         let g = gate(fake.clone(), log.clone());
         let note = OneNote(nid);
         let vec = OneVector(nid.to_string());
-        let deps = test_deps(&g, &note, &vec);
+        let deps = test_deps(g.as_ref(), &note, &vec);
         let ans = answer_question("why is the sky blue?", &deps)
             .await
             .unwrap();
@@ -443,7 +442,7 @@ mod flow_tests {
         let g = gate(fake.clone(), log.clone());
         let note = OneNote(nid);
         let vec = OneVector(nid.to_string());
-        let deps = test_deps(&g, &note, &vec);
+        let deps = test_deps(g.as_ref(), &note, &vec);
         let p = preview("how do I pay?", &deps)
             .await
             .unwrap()
@@ -461,7 +460,7 @@ mod flow_tests {
         let log = Arc::new(SpyLog::default());
         let g = gate(fake, log);
         let vec = OneVector(nid.to_string());
-        let deps = test_deps(&g, &EmptyRepo, &vec);
+        let deps = test_deps(g.as_ref(), &EmptyRepo, &vec);
         assert!(preview("x", &deps).await.unwrap().is_none());
     }
 
@@ -489,7 +488,7 @@ mod flow_tests {
         let g = gate(fake, log);
         let note = OneNote(NoteId::new());
         let vec = OneVector(NoteId::new().to_string());
-        let mut deps = test_deps(&g, &note, &vec);
+        let mut deps = test_deps(g.as_ref(), &note, &vec);
         deps.rewriter = Some(&FakeRewriter("explicit keyword"));
         // This test doesn't assert on the result; it asserts the wiring doesn't panic.
         // A more rigorous test would verify the effective query reaches the keyword index.
@@ -508,7 +507,7 @@ mod flow_tests {
         let g = toggle_gate(fake.clone(), settings.clone(), log.clone());
         let note = OneNote(nid);
         let vec = OneVector(nid.to_string());
-        let deps = test_deps(&g, &note, &vec);
+        let deps = test_deps(g.as_ref(), &note, &vec);
 
         let Some((ctx, _titles)) = assemble_for("how do I pay?", &deps).await.unwrap() else {
             panic!("expected some context");

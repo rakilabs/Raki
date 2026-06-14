@@ -12,7 +12,7 @@ use raki_domain::{
     QueryUnderstanding, SourceId,
 };
 
-use crate::AuditGate;
+
 
 // Real-world timing against kimi-k2-5: simple queries ~1.5-2s, multi-hop ~8-10s.
 // 3s was far too aggressive; 15s gives headroom while still failing fast on genuine hangs.
@@ -38,14 +38,14 @@ Rules:
 Example: "how pay at inn?" → {"rewritten_query":"payment method ryokan inn cash credit card","needs_multi_hop":false,"sub_queries":[],"confidence":0.9}"#;
 
 pub struct CloudQueryRewriter {
-    gate: Arc<AuditGate>,
+    gate: Arc<dyn GatedLlmProvider>,
     provider: String,
     model: String,
     cache: Mutex<LruCache<String, (QueryUnderstanding, Instant)>>,
 }
 
 impl CloudQueryRewriter {
-    pub fn new(gate: Arc<AuditGate>, provider: String, model: String) -> Self {
+    pub fn new(gate: Arc<dyn GatedLlmProvider>, provider: String, model: String) -> Self {
         Self {
             gate,
             provider,
@@ -235,7 +235,7 @@ mod tests {
         assert_eq!(truncated.chars().count(), MAX_QUERY_LEN);
     }
 
-    use crate::testing::FakeLlmProvider;
+    use crate::{AuditGate, testing::FakeLlmProvider};
     use raki_domain::testing::FixedClock;
     use raki_domain::{DomainError, EgressLog, EgressLogId, EgressRecord, EgressSettings};
     use std::collections::HashSet;
