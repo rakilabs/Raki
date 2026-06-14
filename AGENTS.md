@@ -369,6 +369,22 @@ pub async fn save_note(
 - **No `unwrap()`/`expect()` in non-test code** except for genuinely impossible states, and then with a message
   explaining why it's impossible.
 
+### Development tooling
+
+The Rust workspace owns its own toolchain and quality gates. Don't bypass them locally.
+
+- **Toolchain:** `src-tauri/rust-toolchain.toml` pins `stable` and the required components
+  (`rustfmt`, `clippy`, `rust-analyzer`). New clones automatically pick this up.
+- **Formatting:** `src-tauri/rustfmt.toml` is the source of truth. Run `cargo fmt` before committing.
+- **Linting:** clippy is enforced. In VS Code, rust-analyzer runs `clippy --all-targets` on save.
+  CI / pre-commit should reject `-D warnings` failures.
+- **Build config:** `src-tauri/.cargo/config.toml` sets sparse registry, `sccache` as the rustc wrapper,
+  and optimized `dev` / `release` profiles. Install `sccache` (`brew install sccache` on macOS) or
+  comment the wrapper line locally if it isn't available on your machine.
+- **Tests:** use `cargo nextest run` instead of `cargo test` for clearer output and faster execution.
+- **Editor settings:** `.vscode/settings.json` keeps rust-analyzer, formatting, and clippy consistent
+  across contributors.
+
 ---
 
 ## 7. Database & migration rules

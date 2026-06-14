@@ -90,7 +90,7 @@ async fn embed_one(
 
     let items: Vec<(String, raki_domain::Embedding)> = chunks
         .into_iter()
-        .zip(embeddings.into_iter())
+        .zip(embeddings)
         .map(|(chunk, emb)| (format!("{}:{}", note.id, chunk.block_id), emb))
         .collect();
 

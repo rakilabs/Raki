@@ -1,0 +1,17 @@
+edition = "2021"
+max_width = 100
+tab_spaces = 4
+use_small_heuristics = "Default"
+
+# Imports (stable)
+reorder_imports = true
+reorder_modules = true
+
+# Shorthand & cleanup
+use_field_init_shorthand = true
+use_try_shorthand = true
+remove_nested_parens = true
+
+# Formatting style
+hard_tabs = false
+newline_style = "Unix"
