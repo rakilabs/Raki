@@ -9,7 +9,7 @@ mod query_rewrite;
 mod rerank;
 pub mod testing;
 
-pub use egress::GatedLlmProvider;
+pub use egress::AuditGate;
 pub use fake::FakeEmbeddingProvider;
 pub use fake_rerank::FakeReranker;
 pub use fastembed::FastEmbedProvider;

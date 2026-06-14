@@ -18,7 +18,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use raki_ai::{CloudQueryRewriter, GatedLlmProvider, MessagesProvider};
+use raki_ai::{AuditGate, CloudQueryRewriter, MessagesProvider};
 use raki_domain::{
     Clock, DomainError, EgressLog, EgressLogId, EgressRecord, EgressSettings, LlmProvider,
     QueryRewriter,
@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(model.clone()),
         disable_thinking,
     )?);
-    let gate = Arc::new(GatedLlmProvider::new(
+    let gate = Arc::new(AuditGate::new(
         inner,
         Arc::new(ConsentedTo(HashSet::from([provider.clone()]))),
         Arc::new(NoopLog),

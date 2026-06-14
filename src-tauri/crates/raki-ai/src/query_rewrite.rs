@@ -8,11 +8,11 @@ use async_trait::async_trait;
 use lru::LruCache;
 
 use raki_domain::{
-    CompletionRequest, DomainError, EgressDecision, EgressError, QueryRewriter, QueryUnderstanding,
-    SourceId,
+    CompletionRequest, DomainError, EgressDecision, EgressError, GatedLlmProvider, QueryRewriter,
+    QueryUnderstanding, SourceId,
 };
 
-use crate::GatedLlmProvider;
+use crate::AuditGate;
 
 // Real-world timing against kimi-k2-5: simple queries ~1.5-2s, multi-hop ~8-10s.
 // 3s was far too aggressive; 15s gives headroom while still failing fast on genuine hangs.
@@ -38,14 +38,14 @@ Rules:
 Example: "how pay at inn?" → {"rewritten_query":"payment method ryokan inn cash credit card","needs_multi_hop":false,"sub_queries":[],"confidence":0.9}"#;
 
 pub struct CloudQueryRewriter {
-    gate: Arc<GatedLlmProvider>,
+    gate: Arc<AuditGate>,
     provider: String,
     model: String,
     cache: Mutex<LruCache<String, (QueryUnderstanding, Instant)>>,
 }
 
 impl CloudQueryRewriter {
-    pub fn new(gate: Arc<GatedLlmProvider>, provider: String, model: String) -> Self {
+    pub fn new(gate: Arc<AuditGate>, provider: String, model: String) -> Self {
         Self {
             gate,
             provider,
@@ -243,7 +243,7 @@ mod tests {
 
     fn make_rewriter(response: &str) -> CloudQueryRewriter {
         let fake = Arc::new(FakeLlmProvider::ok(response));
-        let gate = Arc::new(GatedLlmProvider::new(
+        let gate = Arc::new(AuditGate::new(
             fake,
             Arc::new(AlwaysConsented),
             Arc::new(NoopLog),
@@ -326,7 +326,7 @@ mod tests {
         let fake = Arc::new(FakeLlmProvider::ok(
             r#"{"rewritten_query":"cached","needs_multi_hop":false,"sub_queries":[],"confidence":0.9}"#,
         ));
-        let gate = Arc::new(GatedLlmProvider::new(
+        let gate = Arc::new(AuditGate::new(
             fake.clone(),
             Arc::new(AlwaysConsented),
             Arc::new(NoopLog),
@@ -342,7 +342,7 @@ mod tests {
     #[tokio::test]
     async fn rewriter_propagates_provider_error() {
         let fake = Arc::new(FakeLlmProvider::failing("network"));
-        let gate = Arc::new(GatedLlmProvider::new(
+        let gate = Arc::new(AuditGate::new(
             fake,
             Arc::new(AlwaysConsented),
             Arc::new(NoopLog),
@@ -356,7 +356,7 @@ mod tests {
     #[tokio::test]
     async fn rewriter_propagates_egress_denied() {
         let fake = Arc::new(FakeLlmProvider::ok("ignored"));
-        let gate = Arc::new(GatedLlmProvider::new(
+        let gate = Arc::new(AuditGate::new(
             fake,
             Arc::new(NeverConsented),
             Arc::new(NoopLog),
@@ -383,7 +383,7 @@ mod tests {
                 })
             }
         }
-        let gate = Arc::new(GatedLlmProvider::new(
+        let gate = Arc::new(AuditGate::new(
             Arc::new(SleepingProvider),
             Arc::new(AlwaysConsented),
             Arc::new(NoopLog),
@@ -412,7 +412,7 @@ mod tests {
         let inner = Arc::new(
             MessagesProvider::from_env_with_options(Some(model.clone()), disable_thinking).unwrap(),
         );
-        let gate = Arc::new(GatedLlmProvider::new(
+        let gate = Arc::new(AuditGate::new(
             inner,
             Arc::new(ConsentedTo(provider.clone())),
             Arc::new(NoopLog),

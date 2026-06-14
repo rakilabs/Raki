@@ -1,5 +1,6 @@
 //! The egress gate: the single, type-enforced path from an `AssembledContext` to a model call.
-//! `approve` is pure policy; `GatedLlmProvider` (Task 4) is the only thing the app is handed.
+//! `approve` is pure policy; `AuditGate` is the concrete adapter that implements the
+//! `raki_domain::GatedLlmProvider` port.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -66,16 +67,16 @@ mod tests {
 /// actually left (after the call). The boundary is enforced by *convention*, not the type system:
 /// `LlmProvider::complete` is public in `raki-domain`, so the compiler cannot forbid an un-gated
 /// call. The guarantee holds because `raki-ai` constructs every cloud provider inside this wrapper
-/// and re-exports only `GatedLlmProvider` — never the raw `dyn LlmProvider` — and AGENTS.md forbids
+/// and re-exports only `AuditGate` — never the raw `dyn LlmProvider` — and AGENTS.md forbids
 /// completion calls outside this crate. Keep it that way: don't re-export a raw cloud provider.
-pub struct GatedLlmProvider {
+pub struct AuditGate {
     inner: Arc<dyn LlmProvider>,
     settings: Arc<dyn EgressSettings>,
     log: Arc<dyn EgressLog>,
     clock: Arc<dyn Clock>,
 }
 
-impl GatedLlmProvider {
+impl AuditGate {
     pub fn new(
         inner: Arc<dyn LlmProvider>,
         settings: Arc<dyn EgressSettings>,
@@ -89,12 +90,11 @@ impl GatedLlmProvider {
             clock,
         }
     }
+}
 
-    /// Complete via the inner provider, enforcing locality-aware policy:
-    /// - `Locality::Local` → always allowed, no log row (nothing left the device).
-    /// - `Locality::Cloud` → requires provider consent; on approval, call + log; on denial,
-    ///   return `EgressError::Denied` with no send and no log row.
-    pub async fn complete_gated(
+#[async_trait::async_trait]
+impl raki_domain::GatedLlmProvider for AuditGate {
+    async fn complete_gated(
         &self,
         egress: &EgressDecision,
         req: CompletionRequest,
@@ -129,8 +129,7 @@ impl GatedLlmProvider {
         Ok((completion, Some(id)))
     }
 
-    /// Attach the groundedness verdict to a prior gated completion's log row.
-    pub async fn set_grounded(&self, id: &EgressLogId, grounded: bool) -> Result<(), DomainError> {
+    async fn set_grounded(&self, id: &EgressLogId, grounded: bool) -> Result<(), DomainError> {
         self.log.set_grounded(id, grounded).await
     }
 }
@@ -139,7 +138,9 @@ impl GatedLlmProvider {
 mod gate_tests {
     use super::*;
     use crate::testing::FakeLlmProvider;
-    use raki_domain::{testing::FixedClock, DomainError, EgressRecord, EgressSettings, SourceId};
+    use raki_domain::{
+        testing::FixedClock, DomainError, EgressRecord, EgressSettings, GatedLlmProvider, SourceId,
+    };
     use std::collections::HashSet;
     use std::sync::Mutex;
 
@@ -209,8 +210,8 @@ mod gate_tests {
         }
     }
 
-    fn gate(inner: Arc<dyn LlmProvider>, log: Arc<SpyLog>, consented: &[&str]) -> GatedLlmProvider {
-        GatedLlmProvider::new(
+    fn gate(inner: Arc<dyn LlmProvider>, log: Arc<SpyLog>, consented: &[&str]) -> AuditGate {
+        AuditGate::new(
             inner,
             Arc::new(FakeSettings {
                 consented: consented.iter().map(|s| s.to_string()).collect(),
@@ -344,7 +345,7 @@ mod gate_tests {
         // The data already left (inner was called once), but the audit write failed — the gate must
         // surface that as EgressError::Audit rather than hand back a dangling, unlogged id.
         let fake = Arc::new(FakeLlmProvider::ok("answer"));
-        let g = GatedLlmProvider::new(
+        let g = AuditGate::new(
             fake.clone(),
             Arc::new(FakeSettings {
                 consented: vec!["kimi".to_string()],
