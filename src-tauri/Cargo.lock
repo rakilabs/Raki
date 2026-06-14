@@ -4062,7 +4062,6 @@ dependencies = [
  "dotenvy",
  "raki-ai",
  "raki-domain",
- "raki-generate",
  "raki-memory",
  "raki-retrieval",
  "raki-storage",

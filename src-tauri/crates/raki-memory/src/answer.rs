@@ -72,10 +72,11 @@ impl AnswerService {
                 state: AnswerState::NothingMatched,
                 text: "No relevant notes found.".into(),
                 cited_ids: vec![],
+                source_titles: HashMap::new(),
                 egress_log_id: None,
             }));
         };
-        match self.send(&ctx, query).await {
+        match self.send(&ctx, &titles, query).await {
             Ok(ans) => Ok(AnswerResult::Answer(ans)),
             Err(GenerateError::Egress(EgressError::Denied(EgressDenied::ConsentRequired))) => Ok(
                 AnswerResult::NeedsConsent(self.preview_from_context(&ctx, &titles)),
@@ -153,7 +154,12 @@ impl AnswerService {
         Ok(Some((ctx, titles)))
     }
 
-    async fn send(&self, ctx: &AssembledContext, query: &str) -> Result<Answer, GenerateError> {
+    async fn send(
+        &self,
+        ctx: &AssembledContext,
+        titles: &HashMap<String, String>,
+        query: &str,
+    ) -> Result<Answer, GenerateError> {
         let req = CompletionRequest {
             system: Some(build_system_prompt(ctx)),
             prompt: query.to_string(),
@@ -176,6 +182,7 @@ impl AnswerService {
             state,
             text,
             cited_ids,
+            source_titles: titles.clone(),
             egress_log_id: log_id,
         })
     }

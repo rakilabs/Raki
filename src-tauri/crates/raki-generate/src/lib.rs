@@ -86,6 +86,7 @@ pub async fn assemble_for(
 /// Send the assembled context to the model (gated). The actual completion + groundedness check.
 pub async fn send_answer(
     ctx: &AssembledContext,
+    titles: &std::collections::HashMap<String, String>,
     query: &str,
     deps: &GenerateDeps<'_>,
 ) -> Result<Answer, GenerateError> {
@@ -112,6 +113,7 @@ pub async fn send_answer(
         state,
         text,
         cited_ids,
+        source_titles: titles.clone(),
         egress_log_id: log_id,
     })
 }
@@ -120,15 +122,16 @@ pub async fn answer_question(
     query: &str,
     deps: &GenerateDeps<'_>,
 ) -> Result<Answer, GenerateError> {
-    let Some((ctx, _titles)) = assemble_for(query, deps).await? else {
+    let Some((ctx, titles)) = assemble_for(query, deps).await? else {
         return Ok(Answer {
             state: AnswerState::NothingMatched,
             text: "No relevant notes found.".into(),
             cited_ids: vec![],
+            source_titles: std::collections::HashMap::new(),
             egress_log_id: None,
         });
     };
-    send_answer(&ctx, query, deps).await
+    send_answer(&ctx, &titles, query, deps).await
 }
 
 /// The egress preview for `query` (no send), or `None` if nothing matched.

@@ -33,6 +33,7 @@ pub struct Answer {
     pub state: AnswerState,
     pub text: String,
     pub cited_ids: Vec<SourceId>,
+    pub source_titles: std::collections::HashMap<String, String>,
     pub egress_log_id: Option<EgressLogId>,
 }
 

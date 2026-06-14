@@ -4,7 +4,7 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use raki_domain::DomainError;
-use raki_generate::GenerateError;
+use raki_memory::GenerateError;
 
 #[derive(Debug, Serialize, TS)]
 #[ts(export, export_to = "../../src/shared/ipc/bindings/")]

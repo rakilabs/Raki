@@ -3,9 +3,10 @@
 use std::sync::Arc;
 
 use raki_domain::{
-    Clock, EgressLog, EgressSettings, EmbeddingProvider, GatedLlmProvider, KeywordIndex,
-    NoteRepository, QueryRewriter, Reranker, SignalBooster, SignalSource, SignalStore, VectorIndex,
+    Clock, EgressLog, EgressSettings, EmbeddingProvider, KeywordIndex, NoteRepository,
+    QueryRewriter, Reranker, SignalBooster, SignalSource, SignalStore, VectorIndex,
 };
+use raki_memory::AnswerService;
 
 use crate::indexing::IndexingService;
 
@@ -19,19 +20,12 @@ pub struct AppState {
     pub reranker: Option<Arc<dyn Reranker>>,
     pub clock: Arc<dyn Clock>,
     pub index: Arc<IndexingService>,
-    /// The only cloud-completion path (wraps MessagesProvider; reads consent live; logs egress).
-    pub gate: Arc<dyn GatedLlmProvider>,
     /// Per-provider consent mutation surface for the consent commands.
     pub settings: Arc<dyn EgressSettings>,
     /// Audit log query surface for the settings UI.
     pub egress_log: Arc<dyn EgressLog>,
-    /// The cloud provider/model the egress decision is attributed to (display + consent key).
-    pub provider: String,
-    pub model: String,
-    /// Number of top search results to retrieve for QA assembly.
-    pub k: usize,
-    /// Token budget for assembled context.
-    pub budget_tokens: usize,
+    /// Grounded answer orchestration service.
+    pub answer_service: Arc<AnswerService>,
     /// Optional query rewriter (cloud LLM) for the Ask flow only.
     pub rewriter: Option<Arc<dyn QueryRewriter>>,
     /// Source of memory-lifecycle signals for retrieval ranking.

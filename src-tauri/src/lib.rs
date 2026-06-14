@@ -20,6 +20,7 @@ use raki_domain::{
     VectorIndex,
 };
 use raki_memory::signals::DefaultSignalBooster;
+use raki_memory::{AnswerConfig, AnswerService};
 use raki_storage::{
     Database, SqliteEgressLog, SqliteEgressSettings, SqliteIndexingStore, SqliteKeywordIndex,
     SqliteNoteRepository, SqliteSignalSource, SqliteSignalStore, SqliteVectorIndex,
@@ -145,6 +146,20 @@ pub fn run() {
                 .map(|v| v == "1" || v == "true")
                 .unwrap_or(false);
 
+            let answer_service = Arc::new(AnswerService::new(
+                keyword.clone(),
+                vectors.clone(),
+                embedder.clone(),
+                notes.clone(),
+                gate.clone(),
+                AnswerConfig {
+                    provider: provider.clone(),
+                    model: model.clone(),
+                    k: 10,
+                    budget: 2000,
+                },
+            ));
+
             let rewriter: Option<Arc<dyn QueryRewriter>> = if query_rewrite_enabled {
                 // Kimi K2.5 defaults to thinking/reasoning mode, which is 5-10x slower than
                 // necessary for query rewriting. Disable it for the rewrite provider.
@@ -188,13 +203,9 @@ pub fn run() {
                 reranker,
                 clock,
                 index,
-                gate,
+                answer_service,
                 settings,
                 egress_log,
-                provider,
-                model,
-                k: 10,
-                budget_tokens: 2000,
                 rewriter,
                 signal_source: signals.clone(),
                 signal_store: signal_store.clone(),
