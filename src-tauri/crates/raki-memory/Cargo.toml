@@ -6,8 +6,11 @@ license.workspace = true
 
 [dependencies]
 raki-domain = { workspace = true }
+raki-retrieval = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
+raki-ai = { workspace = true }
 tokio = { workspace = true }

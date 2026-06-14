@@ -4139,7 +4139,10 @@ name = "raki-memory"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "raki-ai",
  "raki-domain",
+ "raki-retrieval",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]
