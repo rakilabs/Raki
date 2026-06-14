@@ -3,6 +3,15 @@ use raki_domain::body::body_to_blocks;
 const CHUNK_CAP: usize = 1600;
 const MAX_CHUNKS_PER_NOTE: usize = 32;
 
+/// A searchable chunk tied to the stable block ID it came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chunk {
+    /// Stable identifier of the source block (with split index appended by the chunker).
+    pub block_id: String,
+    /// Searchable text for embedding and retrieval.
+    pub text: String,
+}
+
 /// Split text into chunks no longer than `CHUNK_CAP` bytes.
 /// Prefer splitting at whitespace. If a single word exceeds the cap, keep it intact.
 pub fn cap_split(text: &str) -> Vec<String> {
@@ -43,18 +52,22 @@ pub fn cap_split(text: &str) -> Vec<String> {
 /// - Applies `cap_split` so no chunk exceeds the character cap.
 /// - Truncates to `MAX_CHUNKS_PER_NOTE` with a warning.
 /// - If no blocks are produced, returns a single chunk containing the title.
-pub fn chunk_note(title: &str, body: &str, use_prefix: bool) -> Vec<String> {
+pub fn chunk_note(title: &str, body: &str, use_prefix: bool) -> Vec<Chunk> {
     let blocks = body_to_blocks(body);
     if blocks.is_empty() {
         if title.is_empty() {
             return vec![];
         }
-        return vec![title.to_string()];
+        return vec![Chunk {
+            block_id: "title".to_string(),
+            text: title.to_string(),
+        }];
     }
 
-    let mut chunks: Vec<String> = Vec::new();
+    let mut chunks: Vec<Chunk> = Vec::new();
 
     for block in &blocks {
+        let block_id = block.block_id.clone().unwrap_or_else(|| "none".to_string());
         let prefixed = if use_prefix {
             match &block.heading {
                 Some(heading) => format!("{} > {}: {}", title, heading, block.text),
@@ -64,8 +77,13 @@ pub fn chunk_note(title: &str, body: &str, use_prefix: bool) -> Vec<String> {
             block.text.clone()
         };
 
-        let mut split = cap_split(&prefixed);
-        chunks.append(&mut split);
+        let split = cap_split(&prefixed);
+        for (i, text) in split.into_iter().enumerate() {
+            chunks.push(Chunk {
+                block_id: format!("{}:{}", block_id, i),
+                text,
+            });
+        }
 
         if chunks.len() >= MAX_CHUNKS_PER_NOTE {
             break;
@@ -96,7 +114,11 @@ mod tests {
             {"type":"paragraph","content":[{"type":"text","text":"second"}]}
         ]}"#;
         let chunks = chunk_note("My Note", body, false);
-        assert_eq!(chunks, vec!["first", "second"]);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].text, "first");
+        assert_eq!(chunks[1].text, "second");
+        assert_eq!(chunks[0].block_id, "none:0");
+        assert_eq!(chunks[1].block_id, "none:0");
     }
 
     #[test]
@@ -105,7 +127,9 @@ mod tests {
             {"type":"paragraph","content":[{"type":"text","text":"hello world"}]}
         ]}"#;
         let chunks = chunk_note("My Note", body, true);
-        assert_eq!(chunks, vec!["My Note: hello world"]);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].text, "My Note: hello world");
+        assert!(chunks[0].block_id.starts_with("none:0"));
     }
 
     #[test]
@@ -115,20 +139,21 @@ mod tests {
             {"type":"paragraph","content":[{"type":"text","text":"body text"}]}
         ]}"#;
         let chunks = chunk_note("My Note", body, true);
-        assert_eq!(chunks, vec!["My Note > Intro: body text"]);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].text, "My Note > Intro: body text");
     }
 
     #[test]
     fn chunk_note_empty_body_returns_title() {
         let chunks = chunk_note("My Note", "", false);
-        assert_eq!(chunks, vec!["My Note"]);
+        assert_eq!(chunks, vec![Chunk { block_id: "title".to_string(), text: "My Note".to_string() }]);
     }
 
     #[test]
     fn chunk_note_zero_block_body_returns_title() {
         let body = r#"{"type":"doc","content":[{"type":"horizontalRule"}]}"#;
         let chunks = chunk_note("My Note", body, false);
-        assert_eq!(chunks, vec!["My Note"]);
+        assert_eq!(chunks, vec![Chunk { block_id: "title".to_string(), text: "My Note".to_string() }]);
     }
 
     #[test]
@@ -199,16 +224,16 @@ mod tests {
             "expected multiple chunks, got {}",
             chunks.len()
         );
-        let recovered = chunks.join(" ");
+        let recovered = chunks.iter().map(|c| c.text.clone()).collect::<Vec<_>>().join(" ");
         assert!(
             recovered.contains(&long_text),
             "all chunks should be present in recovered text"
         );
         for chunk in &chunks {
             assert!(
-                chunk.len() <= CHUNK_CAP,
+                chunk.text.len() <= CHUNK_CAP,
                 "chunk too long: {} chars",
-                chunk.len()
+                chunk.text.len()
             );
         }
     }

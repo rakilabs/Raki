@@ -84,17 +84,17 @@ pub async fn index_seed_corpus_chunked_with_embedder(
             continue;
         }
 
-        let embs = embedder.embed(&chunks).await.expect("embedder succeeds");
+        let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
+        let embs = embedder.embed(&texts).await.expect("embedder succeeds");
         assert_eq!(
             embs.len(),
             chunks.len(),
             "embedder returned one embedding per chunk"
         );
-        for (i, (_chunk, emb)) in chunks.iter().zip(embs.iter()).enumerate() {
-            // Include the chunk text in the embedding so the keyword index still sees it.
-            let chunk_id = format!("{}#{i}", note.id);
+        for (chunk, emb) in chunks.into_iter().zip(embs.into_iter()) {
+            let source_id = format!("{}:{}", note.id, chunk.block_id);
             vectors
-                .upsert(&chunk_id, emb)
+                .upsert(&source_id, &emb)
                 .await
                 .expect("vector upsert succeeds");
         }

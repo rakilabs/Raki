@@ -70,12 +70,14 @@ async fn embed_one(
 ) -> Result<bool, DomainError> {
     let chunks = chunk_note(&note.title, &note.body, config.use_contextual_prefix);
     if chunks.is_empty() {
-        vectors.delete_by_prefix(&format!("{}#", note.id)).await?;
+        vectors.delete_by_prefix(&format!("{}:", note.id)).await?;
         return store
             .mark_embedded(&note.id, &note.content_hash, &embedder.model_id())
             .await;
     }
-    let embeddings = embedder.embed(&chunks).await?;
+
+    let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
+    let embeddings = embedder.embed(&texts).await?;
     if embeddings.len() != chunks.len() {
         return Err(DomainError::Provider(format!(
             "embedder returned {} embeddings for {} chunks",
@@ -84,12 +86,12 @@ async fn embed_one(
         )));
     }
 
-    vectors.delete_by_prefix(&format!("{}#", note.id)).await?;
+    vectors.delete_by_prefix(&format!("{}:", note.id)).await?;
 
-    let items: Vec<(String, raki_domain::Embedding)> = embeddings
+    let items: Vec<(String, raki_domain::Embedding)> = chunks
         .into_iter()
-        .enumerate()
-        .map(|(i, emb)| (format!("{}#{}", note.id, i), emb))
+        .zip(embeddings.into_iter())
+        .map(|(chunk, emb)| (format!("{}:{}", note.id, chunk.block_id), emb))
         .collect();
 
     vectors.upsert_batch(&items).await?;

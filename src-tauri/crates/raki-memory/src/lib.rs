@@ -7,6 +7,6 @@ pub mod indexing;
 pub mod signals;
 
 pub use answer::{AnswerConfig, AnswerResult, AnswerService, GenerateError};
-pub use chunk::chunk_note;
+pub use chunk::{chunk_note, Chunk};
 pub use context::{assemble_context, AssembledContext, Candidate, ContextItem};
 pub use signals::DefaultSignalBooster;
