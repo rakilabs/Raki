@@ -84,6 +84,17 @@ impl AnswerService {
         }
     }
 
+    pub async fn preview(
+        &self,
+        query: &str,
+        rewriter: Option<&dyn QueryRewriter>,
+    ) -> Result<Option<EgressPreview>, GenerateError> {
+        let Some((ctx, titles)) = self.assemble(query, rewriter).await? else {
+            return Ok(None);
+        };
+        Ok(Some(self.preview_from_context(&ctx, &titles)))
+    }
+
     fn preview_from_context(
         &self,
         ctx: &AssembledContext,
