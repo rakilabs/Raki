@@ -209,11 +209,12 @@ mod tests {
         let note = Note::new("Trip".into(), text_to_body("old"), 1000);
         repo.upsert(&note).await.unwrap();
 
-        let edited = note.edit("Trip".into(), text_to_body("new plan cash"), 2000);
+        let new_body = text_to_body("new plan cash");
+        let edited = note.edit("Trip".into(), new_body.clone(), 2000);
         assert!(repo.update(&edited).await.unwrap(), "live row updated");
 
         let got = repo.get(&note.id).await.unwrap().unwrap();
-        assert_eq!(got.body, text_to_body("new plan cash"));
+        assert_eq!(got.body, new_body);
         assert_eq!(got.version, 2);
         assert_eq!(
             fts_count(&db, &note.id.to_string()).await,

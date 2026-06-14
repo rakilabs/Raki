@@ -135,7 +135,9 @@ pub fn normalize_body(body: &str) -> Result<String, DomainError> {
     let mut value: Value = serde_json::from_str(body)
         .map_err(|e| DomainError::Invalid(format!("invalid body json: {e}")))?;
     if value.get("type").and_then(Value::as_str) != Some("doc") {
-        return Err(DomainError::Invalid("body must be a ProseMirror doc".into()));
+        return Err(DomainError::Invalid(
+            "body must be a ProseMirror doc".into(),
+        ));
     }
     assign_block_ids(&mut value);
     Ok(value.to_string())
@@ -166,7 +168,11 @@ pub fn assign_block_ids(doc: &mut Value) {
 fn is_top_level_block(node: &Value) -> bool {
     matches!(
         node.get("type").and_then(Value::as_str),
-        Some("paragraph") | Some("heading") | Some("bulletList") | Some("orderedList") | Some("codeBlock")
+        Some("paragraph")
+            | Some("heading")
+            | Some("bulletList")
+            | Some("orderedList")
+            | Some("codeBlock")
     )
 }
 

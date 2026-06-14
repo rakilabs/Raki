@@ -146,14 +146,26 @@ mod tests {
     #[test]
     fn chunk_note_empty_body_returns_title() {
         let chunks = chunk_note("My Note", "", false);
-        assert_eq!(chunks, vec![Chunk { block_id: "title".to_string(), text: "My Note".to_string() }]);
+        assert_eq!(
+            chunks,
+            vec![Chunk {
+                block_id: "title".to_string(),
+                text: "My Note".to_string()
+            }]
+        );
     }
 
     #[test]
     fn chunk_note_zero_block_body_returns_title() {
         let body = r#"{"type":"doc","content":[{"type":"horizontalRule"}]}"#;
         let chunks = chunk_note("My Note", body, false);
-        assert_eq!(chunks, vec![Chunk { block_id: "title".to_string(), text: "My Note".to_string() }]);
+        assert_eq!(
+            chunks,
+            vec![Chunk {
+                block_id: "title".to_string(),
+                text: "My Note".to_string()
+            }]
+        );
     }
 
     #[test]
@@ -224,7 +236,11 @@ mod tests {
             "expected multiple chunks, got {}",
             chunks.len()
         );
-        let recovered = chunks.iter().map(|c| c.text.clone()).collect::<Vec<_>>().join(" ");
+        let recovered = chunks
+            .iter()
+            .map(|c| c.text.clone())
+            .collect::<Vec<_>>()
+            .join(" ");
         assert!(
             recovered.contains(&long_text),
             "all chunks should be present in recovered text"
