@@ -4120,17 +4120,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "raki-generate"
-version = "0.1.0"
-dependencies = [
- "raki-domain",
- "raki-memory",
- "raki-retrieval",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "raki-memory"
 version = "0.1.0"
 dependencies = [
